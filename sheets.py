@@ -72,12 +72,9 @@ def add_budget():
 
     for r in data[::-1]:
         if r["Type"] == "BUDGET":
-            try:
-                d = datetime.strptime(r["Date"], "%Y-%m-%d")
-                if d.month == today.month:
-                    return
-            except:
-                pass
+            d = datetime.strptime(r["Date"], "%Y-%m-%d")
+            if d.month == today.month:
+                return
 
     cash, gold = get_last_st()
     cash += 5000
@@ -127,7 +124,6 @@ def get_st_metrics(price):
     data = sheet.get_all_records()
 
     invested = sum([safe(r["Amount"]) for r in data if r["Type"] == "BUY"])
-
     cash, gold = get_last_st()
 
     value = cash + gold * price
@@ -159,25 +155,11 @@ def already_bought():
     today = datetime.now()
 
     for r in data[::-1]:
-        try:
-            d = datetime.strptime(r["Date"], "%Y-%m-%d")
-            if d.month == today.month:
-                return True
-        except:
-            pass
+        d = datetime.strptime(r["Date"], "%Y-%m-%d")
+        if d.month == today.month:
+            return True
 
     return False
-    def get_avg_buy_price():
-    sheet = client().open("Gold Tracker").worksheet("Long Term")
-    data = sheet.get_all_records()
-
-    total_amount = sum([safe(r["Amount"]) for r in data])
-    total_gold = sum([safe(r["Grams"]) for r in data])
-
-    if total_gold == 0:
-        return 0
-
-    return total_amount / total_gold
 
 
 def add_long(price):
@@ -191,3 +173,16 @@ def add_long(price):
         15000,
         grams
     ])
+
+
+def get_avg_buy_price():
+    sheet = client().open("Gold Tracker").worksheet("Long Term")
+    data = sheet.get_all_records()
+
+    total_amount = sum([safe(r["Amount"]) for r in data])
+    total_gold = sum([safe(r["Grams"]) for r in data])
+
+    if total_gold == 0:
+        return 0
+
+    return total_amount / total_gold
