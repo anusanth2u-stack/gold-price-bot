@@ -19,23 +19,42 @@ def get_client():
     return gspread.authorize(creds)
 
 
+# -------- HISTORY --------
 def get_history():
     sheet = get_client().open("Gold Tracker").worksheet("Data")
     values = sheet.col_values(2)[1:]
-    return [int(v) for v in values[-6:] if v]
+    return [int(v) for v in values[-10:] if v]
 
 
-def log_price(price, score):
-    sheet = get_client().open("Gold Tracker").worksheet("Data")
+# -------- LEARNING --------
+def get_learning_factor(current_price):
+    sheet = get_client().open("Gold Tracker").worksheet("Short Term")
+    data = sheet.get_all_records()
 
-    sheet.append_row([
-        datetime.now().strftime("%Y-%m-%d %H:%M"),
-        price,
-        "",
-        score
-    ])
+    if not data:
+        return 0
+
+    score = 0
+    count = 0
+
+    for row in data:
+        if row["Type"] == "BUY":
+            buy_price = float(row["Price"])
+
+            # evaluate after buy
+            diff = current_price - buy_price
+
+            if diff > 100:
+                score += 5   # good buy
+            elif diff < -100:
+                score -= 5   # bad buy
+
+            count += 1
+
+    return score // count if count else 0
 
 
+# -------- SHORT TERM --------
 def get_short_term_summary():
     sheet = get_client().open("Gold Tracker").worksheet("Short Term")
     data = sheet.get_all_records()
@@ -63,6 +82,7 @@ def add_short(txn, amount, price):
     ])
 
 
+# -------- LONG TERM --------
 def add_long(price):
     sheet = get_client().open("Gold Tracker").worksheet("Long Term")
 
@@ -101,6 +121,7 @@ def already_bought():
     return False
 
 
+# -------- PORTFOLIO --------
 def get_portfolio(price):
     st_cash, st_gold = get_short_term_summary()
     lt_inv, lt_gold = get_long_summary()
@@ -112,3 +133,15 @@ def get_portfolio(price):
     pct = (profit / lt_inv * 100) if lt_inv else 0
 
     return total_gold, value, profit, pct, st_cash
+
+
+# -------- DATA --------
+def log_price(price, score):
+    sheet = get_client().open("Gold Tracker").worksheet("Data")
+
+    sheet.append_row([
+        datetime.now().strftime("%Y-%m-%d %H:%M"),
+        price,
+        "",
+        score
+    ])
