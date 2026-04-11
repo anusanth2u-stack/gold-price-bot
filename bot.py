@@ -1,5 +1,4 @@
 import os
-import asyncio
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
     ApplicationBuilder,
@@ -15,39 +14,42 @@ TOKEN = os.environ.get("TELEGRAM_TOKEN")
 USER_ID = 5400949107
 
 
-# -------- DASHBOARD --------
+# ---------------- DASHBOARD ----------------
 async def dashboard(context: ContextTypes.DEFAULT_TYPE):
-    price = logic.get_price()
-    if not price:
-        await context.bot.send_message(chat_id=USER_ID, text="⚠️ Price fetch failed")
-        return
+    try:
+        price = logic.get_price()
+        if not price:
+            await context.bot.send_message(chat_id=USER_ID, text="⚠️ Price fetch failed")
+            return
 
-    history = sheets.get_history()
-    learning = sheets.get_learning_factor(price)
+        history = sheets.get_history()
+        learning = sheets.get_learning_factor(price)
 
-    score = logic.calculate_score(price, history, learning)
-    trend = logic.get_trend(price, history)
-    volatility = logic.get_volatility(history)
-    low, high, conf = logic.predict_ml(price, history)
+        score = logic.calculate_score(price, history, learning)
+        trend = logic.get_trend(price, history)
+        volatility = logic.get_volatility(history)
+        low, high, conf = logic.predict_ml(price, history)
 
-    sheets.log_price(price, score)
+        sheets.log_price(price, score)
 
-    cash, st_gold = sheets.get_short_term_summary()
-    lt_inv, lt_gold = sheets.get_long_summary()
-    bought = sheets.already_bought()
+        # Portfolio
+        cash, st_gold = sheets.get_short_term_summary()
+        lt_inv, lt_gold = sheets.get_long_summary()
+        bought = sheets.already_bought()
 
-    lt_decision = logic.long_term_decision(score, bought)
-    st_decision = logic.short_term_decision(score, cash)
+        lt_decision = logic.long_term_decision(score, bought)
+        st_decision = logic.short_term_decision(score, cash)
 
-    total_gold, value, profit, pct, _ = sheets.get_portfolio(price)
+        total_gold, value, profit, pct, _ = sheets.get_portfolio(price)
 
-    keyboard = [
-        [InlineKeyboardButton("🟢 Long Term Buy ₹15000", callback_data="lt_buy")],
-        [InlineKeyboardButton("🟢 Short Term Buy ₹2000", callback_data="buy")],
-        [InlineKeyboardButton("🔴 Short Term Sell ₹1000", callback_data="sell")],
-    ]
+        # Buttons
+        keyboard = [
+            [InlineKeyboardButton("🟢 Long Term Buy ₹15000", callback_data="lt_buy")],
+            [InlineKeyboardButton("🟢 Short Term Buy ₹2000", callback_data="buy")],
+            [InlineKeyboardButton("🔴 Short Term Sell ₹1000", callback_data="sell")],
+        ]
 
-    msg = f"""
+        msg = f"""
 💎 GOLD AI (SELF LEARNING)
 
 💰 Price: ₹{price}
@@ -79,21 +81,24 @@ P/L: ₹{int(profit)}
 Return: {round(pct,2)}%
 """
 
-    await context.bot.send_message(
-        chat_id=USER_ID,
-        text=msg,
-        reply_markup=InlineKeyboardMarkup(keyboard),
-    )
+        await context.bot.send_message(
+            chat_id=USER_ID,
+            text=msg,
+            reply_markup=InlineKeyboardMarkup(keyboard),
+        )
+
+    except Exception as e:
+        print("Dashboard error:", e)
 
 
-# -------- START --------
+# ---------------- START COMMAND ----------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != USER_ID:
         return
     await dashboard(context)
 
 
-# -------- BUTTON HANDLER --------
+# ---------------- BUTTON HANDLER ----------------
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -101,10 +106,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if query.from_user.id != USER_ID:
         return
 
-    price = logic.get_price()
-    cash, _ = sheets.get_short_term_summary()
-
     try:
+        price = logic.get_price()
+        cash, _ = sheets.get_short_term_summary()
+
         if query.data == "lt_buy":
             sheets.add_long(price)
             await query.message.reply_text("✅ Long-term BUY recorded")
@@ -125,33 +130,30 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.reply_text(f"⚠️ Error: {str(e)}")
 
 
-# -------- SCHEDULER --------
-async def scheduler(app):
-    while True:
-        try:
-            await dashboard(app)
-        except Exception as e:
-            print("Scheduler error:", e)
-
-        await asyncio.sleep(3600)
+# ---------------- SCHEDULER JOB ----------------
+async def scheduler_job(context: ContextTypes.DEFAULT_TYPE):
+    await dashboard(context)
 
 
-# -------- MAIN --------
-async def main():
+# ---------------- MAIN ----------------
+def main():
     app = ApplicationBuilder().token(TOKEN).build()
 
+    # Handlers
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(button_handler))
 
-    # start scheduler AFTER app starts
-    async def post_init(app):
-        asyncio.create_task(scheduler(app))
-
-    app.post_init = post_init
+    # Scheduler (runs every hour)
+    app.job_queue.run_repeating(
+        scheduler_job,
+        interval=3600,   # 1 hour
+        first=10         # start after 10 seconds
+    )
 
     print("Bot running 🚀")
-    await app.run_polling()
+    app.run_polling()
 
 
+# ---------------- RUN ----------------
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
