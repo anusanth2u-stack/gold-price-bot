@@ -1,6 +1,5 @@
 from datetime import datetime
 
-
 def get_trend(price, history):
     if len(history) < 2:
         return "FLAT", "Not enough data"
@@ -11,14 +10,6 @@ def get_trend(price, history):
         return "DOWN ↘️", "Selling pressure"
 
     return "SIDEWAYS", "No clear direction"
-
-
-def risk_signal(pct):
-    if pct > 5:
-        return "🔥 Profit Zone"
-    if pct < -3:
-        return "⚠️ Drawdown Risk"
-    return "🟡 Neutral"
 
 
 def short_term_ai(cash, pct, trend):
