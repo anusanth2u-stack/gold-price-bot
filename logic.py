@@ -1,7 +1,6 @@
 import requests
 from bs4 import BeautifulSoup
 import re
-from datetime import datetime
 
 URL = "https://www.keralagold.com/kerala-gold-rate-per-gram.htm"
 
@@ -22,7 +21,7 @@ def get_price():
 
 
 # -------- SCORE --------
-def calculate_score(price, history):
+def calculate_score(price, history, learning_factor):
     score = 50
 
     if history:
@@ -37,6 +36,9 @@ def calculate_score(price, history):
         score += 15
     else:
         score -= 5
+
+    # APPLY LEARNING
+    score = score + learning_factor
 
     return max(0, min(score, 100))
 
@@ -80,44 +82,23 @@ def get_volatility(history):
     return "LOW 🟢"
 
 
-# -------- PRICE PREDICTION --------
-def predict_range(price, history):
-    if len(history) < 3:
-        return price - 50, price + 50
+# -------- ML PREDICTION --------
+def predict_ml(price, history):
+    if len(history) < 5:
+        return price - 50, price + 50, "Low"
 
-    diffs = [abs(history[i] - history[i-1]) for i in range(1, len(history))]
-    avg_move = sum(diffs) / len(diffs)
+    weights = [1, 2, 3, 4, 5]
+    recent = history[-5:]
 
-    low = int(price - avg_move)
-    high = int(price + avg_move)
+    weighted_avg = sum(w*p for w, p in zip(weights, recent)) / sum(weights)
+    momentum = price - weighted_avg
 
-    return low, high
+    low = int(price - abs(momentum))
+    high = int(price + abs(momentum))
 
+    confidence = "High" if abs(momentum) > 80 else "Medium"
 
-# -------- REASONING --------
-def get_reason(score, trend, volatility):
-    if score >= 75:
-        return "Strong dip — ideal buy zone"
-
-    if score >= 60:
-        return "Below average — good accumulation"
-
-    if score <= 30:
-        return "Overpriced — consider selling"
-
-    if "STRONG DOWN" in trend:
-        return "Falling trend — accumulate slowly"
-
-    if "STRONG UP" in trend:
-        return "Uptrend — wait for correction"
-
-    if "REVERSAL" in trend:
-        return "Trend reversal — early opportunity"
-
-    if "HIGH" in volatility:
-        return "High volatility — stagger buying"
-
-    return "Stable market — hold position"
+    return low, high, confidence
 
 
 # -------- DECISIONS --------
@@ -135,6 +116,7 @@ def short_term_decision(score, cash):
 
 
 def long_term_decision(score, bought):
+    from datetime import datetime
     today = datetime.now().day
 
     if bought:
