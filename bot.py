@@ -97,7 +97,9 @@ async def send_dashboard(context: ContextTypes.DEFAULT_TYPE):
         bought = sheets.already_bought()
 
         st_action, st_amt, st_reason = logic.short_term_ai(st_cash, st_pct, trend)
-        lt_action, lt_amt, lt_reason = logic.long_term_ai(bought)
+        avg_price = sheets.get_avg_buy_price()
+
+        lt_action,lt_amt,lt_reason = logic.long_term_ai(bought,price,avg_price,trend)
 
         total_val = st_value + lt_value
         total_inv = st_inv + lt_inv
