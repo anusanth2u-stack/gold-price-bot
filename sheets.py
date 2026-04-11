@@ -4,9 +4,9 @@ import os
 from datetime import datetime
 
 
-def safe(val):
+def safe(x):
     try:
-        return float(val)
+        return float(x)
     except:
         return 0
 
@@ -26,16 +26,15 @@ def client():
     return gspread.authorize(auth)
 
 
-# ---------------- DATA ----------------
-
-def log_data(price, trend, score):
+# ---------- DATA ----------
+def log_data(price, trend):
     sheet = client().open("Gold Tracker").worksheet("Data")
 
     sheet.append_row([
         datetime.now().strftime("%Y-%m-%d %H:%M"),
         price,
         trend,
-        score
+        50
     ])
 
 
@@ -44,17 +43,16 @@ def get_history():
     data = sheet.get_all_values()[1:]
 
     prices = []
-    for row in data[-10:]:
+    for r in data[-10:]:
         try:
-            prices.append(float(row[1]))
+            prices.append(float(r[1]))
         except:
             pass
 
     return prices
 
 
-# ---------------- SHORT TERM ----------------
-
+# ---------- SHORT TERM ----------
 def get_last_st():
     sheet = client().open("Gold Tracker").worksheet("Short Term")
     data = sheet.get_all_records()
@@ -72,11 +70,14 @@ def add_budget():
 
     today = datetime.now()
 
-    for row in data[::-1]:
-        if row["Type"] == "BUDGET":
-            d = datetime.strptime(row["Date"], "%Y-%m-%d")
-            if d.month == today.month:
-                return
+    for r in data[::-1]:
+        if r["Type"] == "BUDGET":
+            try:
+                d = datetime.strptime(r["Date"], "%Y-%m-%d")
+                if d.month == today.month:
+                    return
+            except:
+                pass
 
     cash, gold = get_last_st()
     cash += 5000
@@ -96,18 +97,17 @@ def add_short(txn, amount, price):
     sheet = client().open("Gold Tracker").worksheet("Short Term")
 
     cash, gold = get_last_st()
-
     grams = round(amount / price, 3)
 
     if txn == "BUY":
         if cash < amount:
-            raise Exception("No cash")
+            raise Exception("Not enough cash")
         cash -= amount
         gold += grams
 
     elif txn == "SELL":
         if gold < grams:
-            raise Exception("No gold")
+            raise Exception("Not enough gold")
         cash += amount
         gold -= grams
 
@@ -126,11 +126,7 @@ def get_st_metrics(price):
     sheet = client().open("Gold Tracker").worksheet("Short Term")
     data = sheet.get_all_records()
 
-    invested = 0
-
-    for row in data:
-        if row["Type"] == "BUY":
-            invested += safe(row["Amount"])
+    invested = sum([safe(r["Amount"]) for r in data if r["Type"] == "BUY"])
 
     cash, gold = get_last_st()
 
@@ -141,18 +137,13 @@ def get_st_metrics(price):
     return invested, cash, gold, value, profit, pct
 
 
-# ---------------- LONG TERM ----------------
-
+# ---------- LONG TERM ----------
 def get_lt_metrics(price):
     sheet = client().open("Gold Tracker").worksheet("Long Term")
     data = sheet.get_all_records()
 
-    inv = 0
-    gold = 0
-
-    for r in data:
-        inv += safe(r["Amount"])
-        gold += safe(r["Grams"])
+    inv = sum([safe(r["Amount"]) for r in data])
+    gold = sum([safe(r["Grams"]) for r in data])
 
     val = gold * price
     profit = val - inv
@@ -168,9 +159,12 @@ def already_bought():
     today = datetime.now()
 
     for r in data[::-1]:
-        d = datetime.strptime(r["Date"], "%Y-%m-%d")
-        if d.month == today.month:
-            return True
+        try:
+            d = datetime.strptime(r["Date"], "%Y-%m-%d")
+            if d.month == today.month:
+                return True
+        except:
+            pass
 
     return False
 
