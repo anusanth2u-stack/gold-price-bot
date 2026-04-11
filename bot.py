@@ -1,7 +1,7 @@
 import os
 import asyncio
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler
 
 import logic
 import sheets
@@ -10,91 +10,105 @@ TOKEN = os.environ.get("TELEGRAM_TOKEN")
 USER_ID = 5400949107
 
 
-def auth(user_id):
+def is_authorized(user_id):
     return user_id == USER_ID
 
 
 async def dashboard(context):
+    sheets.ensure_monthly_budget()
+
     price = logic.get_price()
+    if not price:
+        await context.bot.send_message(chat_id=USER_ID, text="⚠️ Failed to fetch price")
+        return
+
     history = sheets.get_history()
     score = logic.calculate_score(price, history)
 
     sheets.log_price(price, score)
 
-    invested, lt_grams, avg = sheets.get_long_term_summary()
-    cash, st_grams = sheets.get_short_term_summary()
+    cash, gold = sheets.get_summary()
 
-    lt_value = lt_grams * price
-    st_value = st_grams * price + cash
+    decision = logic.short_term_decision(score, cash)
 
     keyboard = [
-        [InlineKeyboardButton("🟢 Confirm LT Buy", callback_data="lt_buy")],
-        [InlineKeyboardButton("🔴 Short Buy", callback_data="st_buy")],
-        [InlineKeyboardButton("🔴 Short Sell", callback_data="st_sell")]
+        [InlineKeyboardButton("🟢 BUY ₹2000", callback_data="buy")],
+        [InlineKeyboardButton("🔴 SELL ₹1000", callback_data="sell")]
     ]
 
     msg = f"""
-💎 GOLD AI DASHBOARD
+💎 GOLD AI ADVISOR
 
 💰 Price: ₹{price}
-📊 Score: {score}
+📊 Score: {score}/100
 
-🟢 LONG TERM
-Invested: ₹{invested}
-Gold: {round(lt_grams,2)}g
-Value: ₹{round(lt_value)}
+💼 Cash: ₹{int(cash)}
+🪙 Gold: {round(gold,3)}g
 
-🔴 SHORT TERM
-Cash: ₹{cash}
-Gold: {round(st_grams,3)}g
-Value: ₹{round(st_value)}
+🤖 Recommendation:
+{decision}
 """
 
-    await context.bot.send_message(chat_id=USER_ID, text=msg,
-                                   reply_markup=InlineKeyboardMarkup(keyboard))
+    await context.bot.send_message(
+        chat_id=USER_ID,
+        text=msg,
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
 
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not auth(update.effective_user.id):
+async def start(update, context):
+    if not is_authorized(update.effective_user.id):
         return
 
     await dashboard(context)
 
 
-async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not auth(update.effective_user.id):
-        return
-
+async def handle_button(update, context):
     query = update.callback_query
     await query.answer()
 
+    if not is_authorized(query.from_user.id):
+        return
+
     price = logic.get_price()
+    cash, _ = sheets.get_summary()
 
-    if query.data == "lt_buy":
-        sheets.long_term_buy(price)
-        await query.message.reply_text("✅ Long-term buy recorded")
+    if query.data == "buy":
+        if cash < 1000:
+            await query.message.reply_text("⛔ Not enough cash")
+            return
 
-    elif query.data == "st_buy":
-        sheets.short_term_txn("BUY", 2000, price)
-        await query.message.reply_text("✅ Short-term BUY")
+        sheets.add_transaction("BUY", 2000, price)
+        await query.message.reply_text("✅ BUY recorded")
 
-    elif query.data == "st_sell":
-        sheets.short_term_txn("SELL", 1000, price)
-        await query.message.reply_text("✅ Short-term SELL")
+    elif query.data == "sell":
+        sheets.add_transaction("SELL", 1000, price)
+        await query.message.reply_text("✅ SELL recorded")
 
 
 async def scheduler(app):
     while True:
-        await dashboard(app)
+        try:
+            await dashboard(app)
+        except Exception as e:
+            print("Error:", e)
+
         await asyncio.sleep(3600)
 
 
-app = ApplicationBuilder().token(TOKEN).build()
+async def main():
+    app = ApplicationBuilder().token(TOKEN).build()
 
-app.add_handler(CommandHandler("start", start))
-app.add_handler(CallbackQueryHandler(button))
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CallbackQueryHandler(handle_button))
 
-app.post_init = scheduler
+    await app.initialize()
+    await app.start()
+
+    asyncio.create_task(scheduler(app))
+
+    await app.updater.start_polling()
+
 
 print("Bot running 🚀")
-app.run_polling()
+asyncio.run(main())
