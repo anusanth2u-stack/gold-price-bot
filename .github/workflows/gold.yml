@@ -2,7 +2,7 @@ name: Gold Price Bot
 
 on:
   schedule:
-    - cron: '30 3-12 * * *'   # 9 AM–6 PM IST every hour
+    - cron: '30 3-12 * * *'
   workflow_dispatch:
 
 jobs:
@@ -10,15 +10,16 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v3
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-    - name: Setup Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.10'
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
 
-    - name: Install dependencies
-      run: pip install requests beautifulsoup4
+      - name: Install dependencies
+        run: pip install requests beautifulsoup4
 
-    - name: Run script
-      run: python gold.py
+      - name: Run script
+        run: python gold.py
