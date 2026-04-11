@@ -12,7 +12,7 @@ TOKEN = os.environ.get("TELEGRAM_TOKEN")
 USER_ID = 5400949107
 
 
-# ✅ REAL PRICE FETCH (NO FALLBACK)
+# ✅ REAL PRICE FETCH (FIXED USING "Today" ROW)
 def get_price():
     try:
         url = "https://www.keralagold.com/kerala-gold-rate-per-gram.htm"
@@ -28,28 +28,25 @@ def get_price():
 
         soup = BeautifulSoup(res.text, "html.parser")
 
-        tables = soup.find_all("table")
+        rows = soup.find_all("tr")
 
-        for table in tables:
-            rows = table.find_all("tr")
+        for row in rows:
+            cols = row.find_all("td")
 
-            for row in rows:
-                cols = row.find_all("td")
+            if len(cols) == 2:
+                label = cols[0].get_text(strip=True)
 
-                if len(cols) >= 2:
-                    text = cols[0].get_text(strip=True)
+                # ✅ KEY FIX: ONLY PICK "Today" ROW
+                if "Today" in label:
+                    price_text = cols[1].get_text(strip=True)
 
-                    # Look for 22K gold price
-                    if "22" in text:
-                        price_text = cols[1].get_text(strip=True)
+                    price = (
+                        price_text.replace("Rs.", "")
+                        .replace(",", "")
+                        .strip()
+                    )
 
-                        price = (
-                            price_text.replace("₹", "")
-                            .replace(",", "")
-                            .strip()
-                        )
-
-                        return float(price)
+                    return float(price)
 
         return None
 
