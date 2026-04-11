@@ -1,29 +1,47 @@
-async def dashboard(context):
-    price = 14000  # replace with API
+import os
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import (
+    ApplicationBuilder,
+    CommandHandler,
+    CallbackQueryHandler,
+    ContextTypes,
+)
 
-    history = []
-    trend, trend_reason = logic.get_trend(price, history)
+import logic
+import sheets
 
-    # SHORT TERM
-    st_inv, st_cash, st_gold, gold_val, st_value, st_profit, st_pct = sheets.get_short_term_metrics(price)
+TOKEN = os.environ.get("TELEGRAM_TOKEN")
+USER_ID = 5400949107
 
-    # LONG TERM
-    lt_inv, lt_gold, lt_value, lt_profit, lt_pct = sheets.get_long_term_metrics(price)
 
-    bought = sheets.already_bought_this_month()
+# ---------- CORE DASHBOARD ----------
+async def send_dashboard(context: ContextTypes.DEFAULT_TYPE):
+    try:
+        price = 14000  # replace with live API later
 
-    # AI
-    st_action, st_amt, st_reason = logic.short_term_ai(st_cash, st_pct, trend)
-    lt_action, lt_amt, lt_reason = logic.long_term_ai(bought)
+        history = []
+        trend, trend_reason = logic.get_trend(price, history)
 
-    risk = logic.risk_signal(st_pct)
+        # SHORT TERM
+        st_inv, st_cash, st_gold, gold_val, st_value, st_profit, st_pct = sheets.get_short_term_metrics(price)
 
-    total_value = st_value + lt_value
-    total_inv = st_inv + lt_inv
-    total_profit = total_value - total_inv
-    total_pct = (total_profit / total_inv * 100) if total_inv else 0
+        # LONG TERM
+        lt_inv, lt_gold, lt_value, lt_profit, lt_pct = sheets.get_long_term_metrics(price)
 
-    msg = f"""
+        bought = sheets.already_bought_this_month()
+
+        # AI
+        st_action, st_amt, st_reason = logic.short_term_ai(st_cash, st_pct, trend)
+        lt_action, lt_amt, lt_reason = logic.long_term_ai(bought)
+
+        risk = logic.risk_signal(st_pct)
+
+        total_value = st_value + lt_value
+        total_inv = st_inv + lt_inv
+        total_profit = total_value - total_inv
+        total_pct = (total_profit / total_inv * 100) if total_inv else 0
+
+        msg = f"""
 💎 GOLD AI PORTFOLIO ENGINE
 
 💰 Price: ₹{price}
@@ -79,19 +97,77 @@ Long-Term: {lt_action}
 Reason: {lt_reason}
 """
 
-    keyboard = []
+        keyboard = []
 
-    if lt_action == "BUY":
-        keyboard.append([InlineKeyboardButton("🟢 LT BUY ₹15000", callback_data="lt_buy")])
+        if lt_action == "BUY":
+            keyboard.append([InlineKeyboardButton("🟢 LT BUY ₹15000", callback_data="lt_buy")])
 
-    if st_action == "BUY":
-        keyboard.append([InlineKeyboardButton(f"🟢 BUY ₹{st_amt}", callback_data=f"buy_{st_amt}")])
+        if st_action == "BUY":
+            keyboard.append([InlineKeyboardButton(f"🟢 BUY ₹{st_amt}", callback_data=f"buy_{st_amt}")])
 
-    if st_action == "SELL":
-        keyboard.append([InlineKeyboardButton(f"🔴 SELL ₹{st_amt}", callback_data=f"sell_{st_amt}")])
+        if st_action == "SELL":
+            keyboard.append([InlineKeyboardButton(f"🔴 SELL ₹{st_amt}", callback_data=f"sell_{st_amt}")])
 
-    await context.bot.send_message(
-        chat_id=USER_ID,
-        text=msg,
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
+        await context.bot.send_message(
+            chat_id=USER_ID,
+            text=msg,
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+
+    except Exception as e:
+        print("DASHBOARD ERROR:", e)
+
+
+# ---------- COMMAND ----------
+async def start_command(update, context):
+    await send_dashboard(context)
+
+
+# ---------- SCHEDULER ----------
+async def scheduler_job(context):
+    await send_dashboard(context)
+
+
+# ---------- BUTTONS ----------
+async def button_handler(update, context):
+    query = update.callback_query
+    await query.answer()
+
+    price = 14000
+
+    try:
+        if query.data == "lt_buy":
+            sheets.add_long(price)
+            await query.message.reply_text("✅ Long-term buy recorded")
+
+        elif "buy_" in query.data:
+            amt = int(query.data.split("_")[1])
+            sheets.add_short("BUY", amt, price)
+            await query.message.reply_text(f"BUY ₹{amt}")
+
+        elif "sell_" in query.data:
+            amt = int(query.data.split("_")[1])
+            sheets.add_short("SELL", amt, price)
+            await query.message.reply_text(f"SELL ₹{amt}")
+
+    except Exception as e:
+        await query.message.reply_text(f"❌ Error: {e}")
+
+
+# ---------- MAIN ----------
+def main():
+    app = ApplicationBuilder().token(TOKEN).build()
+
+    app.add_handler(CommandHandler("start", start_command))
+    app.add_handler(CallbackQueryHandler(button_handler))
+
+    if app.job_queue:
+        app.job_queue.run_repeating(scheduler_job, interval=3600, first=10)
+
+    print("Bot running 🚀")
+
+    app.run_polling()
+
+
+if __name__ == "__main__":
+    main()
