@@ -3,6 +3,7 @@ from oauth2client.service_account import ServiceAccountCredentials
 import os
 from datetime import datetime
 
+
 def get_client():
     creds_json = os.environ.get("GOOGLE_CREDENTIALS")
 
@@ -18,42 +19,30 @@ def get_client():
     return gspread.authorize(creds)
 
 
-def log_price(price, score):
+def ensure_monthly_budget():
     client = get_client()
-    sheet = client.open("Gold Tracker").worksheet("Data")
+    sheet = client.open("Gold Tracker").worksheet("Short Term")
+
+    data = sheet.get_all_records()
+    today = datetime.now()
+    current_month = today.strftime("%Y-%m")
+
+    for row in data:
+        if row["Type"] == "BUDGET" and row["Date"].startswith(current_month):
+            return
 
     sheet.append_row([
-        datetime.now().strftime("%Y-%m-%d %H:%M"),
-        price,
+        today.strftime("%Y-%m-%d"),
+        "BUDGET",
         "",
-        score
+        5000,
+        "",
+        "",
+        ""
     ])
 
 
-def get_history():
-    client = get_client()
-    sheet = client.open("Gold Tracker").worksheet("Data")
-    data = sheet.col_values(2)[1:]
-    return [int(x) for x in data[-5:]]
-
-
-def long_term_buy(price):
-    client = get_client()
-    sheet = client.open("Gold Tracker").worksheet("Long Term")
-
-    amount = 15000
-    grams = round(amount / price, 3)
-
-    sheet.append_row([
-        datetime.now().strftime("%Y-%m-%d"),
-        "Y",
-        price,
-        amount,
-        grams
-    ])
-
-
-def short_term_txn(txn_type, amount, price):
+def add_transaction(txn_type, amount, price):
     client = get_client()
     sheet = client.open("Gold Tracker").worksheet("Short Term")
 
@@ -64,52 +53,45 @@ def short_term_txn(txn_type, amount, price):
         txn_type,
         price,
         amount,
-        grams
+        grams,
+        "",
+        ""
     ])
 
 
-def get_long_term_summary():
-    client = get_client()
-    sheet = client.open("Gold Tracker").worksheet("Long Term")
-    data = sheet.get_all_records()
-
-    invested = sum([r["Amount"] for r in data]) if data else 0
-    grams = sum([r["Grams"] for r in data]) if data else 0
-
-    avg = invested / grams if grams else 0
-
-    return invested, grams, avg
-
-
-def get_short_term_summary():
+def get_summary():
     client = get_client()
     sheet = client.open("Gold Tracker").worksheet("Short Term")
+
     data = sheet.get_all_records()
 
-    cash = 5000
-    grams = 0
+    if not data:
+        return 0, 0
 
-    for r in data:
-        if r["Type"] == "BUY":
-            cash -= r["Amount"]
-            grams += r["Grams"]
-        else:
-            cash += r["Amount"]
-            grams -= r["Grams"]
+    last = data[-1]
 
-    return cash, grams
+    cash = float(last.get("Cash Balance") or 0)
+    gold = float(last.get("Gold Holding") or 0)
+
+    return cash, gold
 
 
-def already_bought_this_month():
+def get_history():
     client = get_client()
-    sheet = client.open("Gold Tracker").worksheet("Long Term")
-    data = sheet.get_all_records()
+    sheet = client.open("Gold Tracker").worksheet("Data")
 
-    today = datetime.now()
+    values = sheet.col_values(2)[1:]
 
-    for r in reversed(data):
-        d = datetime.strptime(r["Date"], "%Y-%m-%d")
-        if d.month == today.month:
-            return True
+    return [int(v) for v in values[-5:] if v]
 
-    return False
+
+def log_price(price, score):
+    client = get_client()
+    sheet = client.open("Gold Tracker").worksheet("Data")
+
+    sheet.append_row([
+        datetime.now().strftime("%Y-%m-%d %H:%M"),
+        price,
+        "",
+        score
+    ])
