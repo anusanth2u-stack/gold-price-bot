@@ -1,5 +1,6 @@
 from datetime import datetime
 
+
 def get_trend(price, history):
     if len(history) < 2:
         return "FLAT", "Not enough data"
@@ -12,20 +13,20 @@ def get_trend(price, history):
     return "SIDEWAYS", "No clear direction"
 
 
-def risk_signal(profit_pct):
-    if profit_pct > 5:
+def risk_signal(pct):
+    if pct > 5:
         return "🔥 Profit Zone"
-    if profit_pct < -3:
+    if pct < -3:
         return "⚠️ Drawdown Risk"
     return "🟡 Neutral"
 
 
-def short_term_ai(cash, profit_pct, trend):
-    if profit_pct >= 5:
-        return "SELL", int(cash * 0.5), "High profit booking"
+def short_term_ai(cash, pct, trend):
+    if pct >= 5:
+        return "SELL", int(cash * 0.4), "High profit booking"
 
-    if profit_pct >= 3:
-        return "SELL", int(cash * 0.3), "Partial profit booking"
+    if pct >= 3:
+        return "SELL", int(cash * 0.25), "Partial profit booking"
 
     if trend.startswith("DOWN") and cash > 1000:
         return "BUY", min(2000, cash), "Buying dip"
@@ -42,4 +43,4 @@ def long_term_ai(already_bought):
     if today < 23:
         return "BUY", 15000, "Mandatory buy before 23rd"
 
-    return "BUY", 15000, "Deadline crossed — invest immediately"
+    return "BUY", 15000, "Deadline crossed"
