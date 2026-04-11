@@ -2,7 +2,7 @@ name: Gold Price Bot
 
 on:
   schedule:
-    - cron: '30 3-12 * * *'
+    - cron: '30 3-12 * * *'   # 9 AM–6 PM IST
   workflow_dispatch:
 
 jobs:
@@ -21,12 +21,16 @@ jobs:
       - name: Install dependencies
         run: pip install requests beautifulsoup4 gspread oauth2client
 
+      # 🔥 FIXED: Properly inject credentials
       - name: Inject Google Credentials
-        run: echo "$GOOGLE_CREDENTIALS" > credentials.json
         env:
           GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
+        run: |
+          echo "$GOOGLE_CREDENTIALS" > credentials.json
 
+      # 🔥 FIXED: Pass secrets to Python
       - name: Run Script
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
         run: python gold.py
