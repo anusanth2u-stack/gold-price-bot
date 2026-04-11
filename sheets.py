@@ -167,6 +167,17 @@ def already_bought():
             pass
 
     return False
+    def get_avg_buy_price():
+    sheet = client().open("Gold Tracker").worksheet("Long Term")
+    data = sheet.get_all_records()
+
+    total_amount = sum([safe(r["Amount"]) for r in data])
+    total_gold = sum([safe(r["Grams"]) for r in data])
+
+    if total_gold == 0:
+        return 0
+
+    return total_amount / total_gold
 
 
 def add_long(price):
