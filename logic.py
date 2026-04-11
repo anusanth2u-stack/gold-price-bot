@@ -21,14 +21,12 @@ def risk_signal(profit_pct):
 
 
 def short_term_ai(cash, profit_pct, trend):
-    # SELL LOGIC
     if profit_pct >= 5:
-        return "SELL", int(cash * 0.5), "High profit secured"
+        return "SELL", int(cash * 0.5), "High profit booking"
 
     if profit_pct >= 3:
-        return "SELL", int(cash * 0.3), "Profit booking opportunity"
+        return "SELL", int(cash * 0.3), "Partial profit booking"
 
-    # BUY LOGIC
     if trend.startswith("DOWN") and cash > 1000:
         return "BUY", min(2000, cash), "Buying dip"
 
