@@ -5,19 +5,23 @@ import re
 URL = "https://www.keralagold.com/kerala-gold-rate-per-gram.htm"
 
 def get_gold_price():
-    res = requests.get(URL)
-    soup = BeautifulSoup(res.text, "html.parser")
-    text = soup.get_text()
+    try:
+        res = requests.get(URL, timeout=10)
+        soup = BeautifulSoup(res.text, "html.parser")
+        text = soup.get_text()
 
-    match = re.search(r"Today\s*»Rs\.\s*([\d,]+)", text)
-    
-    if match:
-        return match.group(1)
+        match = re.search(r"Today\s*»Rs\.\s*([\d,]+)", text)
+        
+        if match:
+            return match.group(1)
+    except Exception as e:
+        print("Error fetching price:", e)
+
     return None
 
 
 def send_telegram(price):
-    TOKEN = "8745874680:AAHXnABEYv_JA-0o-OVh923N4JKtUBFYLXg"
+    TOKEN = "8745874680:AAGabWeeKDwUYEHOcpYfpEPYOl9O3mX9-M8"   # 🔴 Replace this
     CHAT_ID = "5400949107"
 
     message = f"💰 Gold Price Update\n1g (22K): ₹{price}"
@@ -28,5 +32,8 @@ def send_telegram(price):
 
 if __name__ == "__main__":
     price = get_gold_price()
+    
     if price:
         send_telegram(price)
+    else:
+        print("Price not found")
