@@ -2,7 +2,7 @@ name: Gold Price Bot
 
 on:
   schedule:
-    - cron: '30 3-12 * * *'
+    - cron: '30 3-12 * * *'   # 9 AM–6 PM IST
   workflow_dispatch:
 
 jobs:
