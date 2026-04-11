@@ -26,29 +26,7 @@ def get_client():
     return gspread.authorize(creds)
 
 
-def get_history():
-    sheet = get_client().open("Gold Tracker").worksheet("Data")
-    rows = sheet.get_all_values()[1:]
-
-    prices = []
-    for row in rows[-10:]:
-        if row and len(row) > 1 and row[1]:
-            prices.append(safe_float(row[1]))
-
-    return prices
-
-
-def log_price(price, score):
-    sheet = get_client().open("Gold Tracker").worksheet("Data")
-
-    sheet.append_row([
-        datetime.now().strftime("%Y-%m-%d %H:%M"),
-        price,
-        "",
-        score
-    ])
-
-
+# -------- SUMMARY --------
 def get_short_term_summary():
     sheet = get_client().open("Gold Tracker").worksheet("Short Term")
     data = sheet.get_all_records()
@@ -61,10 +39,56 @@ def get_short_term_summary():
     return safe_float(last.get("Cash Balance")), safe_float(last.get("Gold Holding"))
 
 
+# -------- METRICS --------
+def get_short_term_metrics(price):
+    sheet = get_client().open("Gold Tracker").worksheet("Short Term")
+    data = sheet.get_all_records()
+
+    total_buy = 0
+    total_sell = 0
+    gold = 0
+
+    for row in data:
+        typ = row.get("Type")
+        amt = safe_float(row.get("Amount"))
+        grams = safe_float(row.get("Grams"))
+
+        if typ == "BUY":
+            total_buy += amt
+            gold += grams
+
+        elif typ == "SELL":
+            total_sell += amt
+            gold -= grams
+
+    value = gold * price
+    invested = total_buy - total_sell
+
+    profit = value - invested
+    pct = (profit / invested * 100) if invested > 0 else 0
+
+    return profit, pct, gold, value
+
+
+# -------- ADD ENTRY --------
 def add_short(txn, amount, price):
     sheet = get_client().open("Gold Tracker").worksheet("Short Term")
 
-    grams = round(amount / price, 3)
+    cash, gold = get_short_term_summary()
+
+    grams = round(amount / price, 3) if price else 0
+
+    if txn == "BUY":
+        if cash < amount:
+            raise Exception("Not enough cash")
+        cash -= amount
+        gold += grams
+
+    elif txn == "SELL":
+        if gold < grams:
+            raise Exception("Not enough gold")
+        cash += amount
+        gold -= grams
 
     sheet.append_row([
         datetime.now().strftime("%Y-%m-%d"),
@@ -72,82 +96,6 @@ def add_short(txn, amount, price):
         price,
         amount,
         grams,
-        "",
-        ""
+        round(cash, 2),
+        round(gold, 3)
     ])
-
-
-def add_long(price):
-    sheet = get_client().open("Gold Tracker").worksheet("Long Term")
-
-    amount = 15000
-    grams = round(amount / price, 3)
-
-    sheet.append_row([
-        datetime.now().strftime("%Y-%m-%d"),
-        price,
-        amount,
-        grams
-    ])
-
-
-def get_long_summary():
-    sheet = get_client().open("Gold Tracker").worksheet("Long Term")
-    data = sheet.get_all_records()
-
-    invested = sum(safe_float(r.get("Amount")) for r in data)
-    grams = sum(safe_float(r.get("Grams")) for r in data)
-
-    return invested, grams
-
-
-def already_bought():
-    sheet = get_client().open("Gold Tracker").worksheet("Long Term")
-    data = sheet.get_all_records()
-
-    today = datetime.now()
-
-    for r in data:
-        try:
-            d = datetime.strptime(r["Date"], "%Y-%m-%d")
-            if d.month == today.month:
-                return True
-        except:
-            pass
-
-    return False
-
-
-def get_learning_factor(current_price):
-    sheet = get_client().open("Gold Tracker").worksheet("Short Term")
-    data = sheet.get_all_records()
-
-    score = 0
-    count = 0
-
-    for row in data:
-        if row.get("Type") == "BUY":
-            buy_price = safe_float(row.get("Price"))
-            diff = current_price - buy_price
-
-            if diff > 100:
-                score += 5
-            elif diff < -100:
-                score -= 5
-
-            count += 1
-
-    return int(score / count) if count else 0
-
-
-def get_portfolio(price):
-    st_cash, st_gold = get_short_term_summary()
-    lt_inv, lt_gold = get_long_summary()
-
-    total_gold = st_gold + lt_gold
-    value = total_gold * price
-
-    profit = value - lt_inv
-    pct = (profit / lt_inv * 100) if lt_inv else 0
-
-    return total_gold, value, profit, pct, st_cash
