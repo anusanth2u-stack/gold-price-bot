@@ -2,7 +2,6 @@ import requests
 from bs4 import BeautifulSoup
 import re
 
-
 URL = "https://www.keralagold.com/kerala-gold-rate-per-gram.htm"
 
 
@@ -21,6 +20,7 @@ def get_price():
     return None
 
 
+# -------- SCORE --------
 def calculate_score(price, history, learning):
     score = 50
 
@@ -30,7 +30,7 @@ def calculate_score(price, history, learning):
         else:
             score -= 10
 
-    avg = sum(history) / len(history) if history else price
+    avg = sum(history)/len(history) if history else price
 
     if price < avg:
         score += 15
@@ -42,6 +42,7 @@ def calculate_score(price, history, learning):
     return max(0, min(score, 100))
 
 
+# -------- TREND --------
 def get_trend(price, history):
     if len(history) < 3:
         return "FLAT"
@@ -49,76 +50,64 @@ def get_trend(price, history):
     short = price - history[-1]
     medium = history[-1] - history[-3]
 
-    if short > 0 and medium > 0:
+    if short > 50 and medium > 50:
         return "STRONG UP 📈"
 
-    if short < 0 and medium < 0:
+    if short < -50 and medium < -50:
         return "STRONG DOWN 📉"
 
     if short > 0:
-        return "REVERSAL UP 🔄"
+        return "UP ↗️"
 
     if short < 0:
-        return "REVERSAL DOWN 🔄"
+        return "DOWN ↘️"
 
     return "SIDEWAYS"
 
 
-def get_volatility(history):
-    if len(history) < 3:
-        return "LOW"
-
-    diffs = [abs(history[i] - history[i-1]) for i in range(1, len(history))]
-    avg = sum(diffs) / len(diffs)
-
-    if avg > 150:
-        return "HIGH 🔥"
-    if avg > 70:
-        return "MEDIUM ⚡"
-
-    return "LOW 🟢"
-
-
-def predict_ml(price, history):
-    if len(history) < 5:
-        return price - 50, price + 50, "LOW"
-
-    weights = [1, 2, 3, 4, 5]
-    recent = history[-5:]
-
-    weighted_avg = sum(w * p for w, p in zip(weights, recent)) / sum(weights)
-    momentum = price - weighted_avg
-
-    low = int(price - abs(momentum))
-    high = int(price + abs(momentum))
-
-    confidence = "HIGH" if abs(momentum) > 80 else "MEDIUM"
-
-    return low, high, confidence
-
-
-def short_term_decision(score, cash):
+# -------- AI BUY SIZE --------
+def get_buy_amount(score, cash):
     if cash < 500:
-        return "⛔ NO CASH"
+        return 0
 
-    if score >= 75:
-        return f"🟢 BUY ₹{min(2000, int(cash))}"
+    if score >= 80:
+        return min(3000, cash)
 
-    if score <= 30:
-        return "🔴 SELL ₹1000"
+    if score >= 65:
+        return min(2000, cash)
 
-    return "⏳ HOLD"
+    if score >= 55:
+        return min(1000, cash)
+
+    return 0
 
 
-def long_term_decision(score, bought):
-    from datetime import datetime
+# -------- AI SELL SIZE --------
+def get_sell_amount(profit_pct, gold_value):
+    if gold_value <= 0:
+        return 0
 
-    day = datetime.now().day
+    if profit_pct >= 5:
+        return gold_value * 0.5   # sell 50%
 
-    if bought:
-        return "✅ DONE"
+    if profit_pct >= 3:
+        return gold_value * 0.3
 
-    if day >= 23 or day <= 3:
-        return "🟢 BUY NOW" if score >= 60 else "⏳ WAIT"
+    if profit_pct >= 2:
+        return gold_value * 0.2
 
-    return "⏳ OUTSIDE WINDOW"
+    return 0
+
+
+# -------- FINAL DECISION --------
+def short_term_ai(score, cash, profit_pct, gold_value):
+    buy_amt = get_buy_amount(score, cash)
+    sell_amt = get_sell_amount(profit_pct, gold_value)
+
+    if sell_amt > 0:
+        return "SELL", int(sell_amt)
+
+    if buy_amt > 0:
+        return "BUY", int(buy_amt)
+
+    return "HOLD", 0
