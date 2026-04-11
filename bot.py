@@ -1,135 +1,97 @@
-import os
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.ext import (
-    ApplicationBuilder,
-    CommandHandler,
-    CallbackQueryHandler,
-    ContextTypes,
-)
+async def dashboard(context):
+    price = 14000  # replace with API
 
-import logic
-import sheets
+    history = []
+    trend, trend_reason = logic.get_trend(price, history)
 
-TOKEN = os.environ.get("TELEGRAM_TOKEN")
-USER_ID = 5400949107
+    # SHORT TERM
+    st_inv, st_cash, st_gold, gold_val, st_value, st_profit, st_pct = sheets.get_short_term_metrics(price)
 
+    # LONG TERM
+    lt_inv, lt_gold, lt_value, lt_profit, lt_pct = sheets.get_long_term_metrics(price)
 
-async def dashboard(context: ContextTypes.DEFAULT_TYPE):
-    try:
-        price = logic.get_price()
-        if not price:
-            await context.bot.send_message(chat_id=USER_ID, text="⚠️ Price fetch failed")
-            return
+    bought = sheets.already_bought_this_month()
 
-        history = sheets.get_history()
-        learning = sheets.get_learning_factor(price)
+    # AI
+    st_action, st_amt, st_reason = logic.short_term_ai(st_cash, st_pct, trend)
+    lt_action, lt_amt, lt_reason = logic.long_term_ai(bought)
 
-        score = logic.calculate_score(price, history, learning)
-        trend = logic.get_trend(price, history)
-        volatility = logic.get_volatility(history)
-        low, high, conf = logic.predict_ml(price, history)
+    risk = logic.risk_signal(st_pct)
 
-        sheets.log_price(price, score)
+    total_value = st_value + lt_value
+    total_inv = st_inv + lt_inv
+    total_profit = total_value - total_inv
+    total_pct = (total_profit / total_inv * 100) if total_inv else 0
 
-        cash, st_gold = sheets.get_short_term_summary()
-        lt_inv, lt_gold = sheets.get_long_summary()
-        bought = sheets.already_bought()
-
-        lt_decision = logic.long_term_decision(score, bought)
-        st_decision = logic.short_term_decision(score, cash)
-
-        total_gold, value, profit, pct, _ = sheets.get_portfolio(price)
-
-        keyboard = [
-            [InlineKeyboardButton("🟢 Long Term Buy ₹15000", callback_data="lt_buy")],
-            [InlineKeyboardButton("🟢 Short Term Buy ₹2000", callback_data="buy")],
-            [InlineKeyboardButton("🔴 Short Term Sell ₹1000", callback_data="sell")],
-        ]
-
-        msg = f"""
-💎 GOLD AI
+    msg = f"""
+💎 GOLD AI PORTFOLIO ENGINE
 
 💰 Price: ₹{price}
-📊 Score: {score}
-🧠 Learning: {learning}
 
-📉 Trend: {trend}
-⚡ Volatility: {volatility}
+📉 MARKET TREND
+Trend: {trend}
+Insight: {trend_reason}
 
-🔮 Prediction: ₹{low} – ₹{high} ({conf})
-
-━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━━
 🟢 LONG TERM
-{lt_decision}
 
+Invested: ₹{int(lt_inv)}
+Gold: {round(lt_gold,3)}g
+Value: ₹{int(lt_value)}
+
+P/L: ₹{int(lt_profit)} ({round(lt_pct,2)}%)
+
+Action: {lt_action}
+Reason: {lt_reason}
+
+━━━━━━━━━━━━━━━━━━━
 🔴 SHORT TERM
-Cash: ₹{int(cash)}
-Gold: {round(st_gold,3)}g
-Action: {st_decision}
 
-━━━━━━━━━━━━━━━
-📊 PORTFOLIO
-Gold: {round(total_gold,3)}g
-Value: ₹{int(value)}
+💵 Cash: ₹{int(st_cash)}
+🪙 Gold: {round(st_gold,3)}g
 
-P/L: ₹{int(profit)}
-Return: {round(pct,2)}%
+Gold Value: ₹{int(gold_val)}
+Total Value: ₹{int(st_value)}
+
+Invested: ₹{int(st_inv)}
+
+P/L: ₹{int(st_profit)}
+Return: {round(st_pct,2)}%
+
+Risk: {risk}
+
+━━━━━━━━━━━━━━━━━━━
+💎 TOTAL
+
+Value: ₹{int(total_value)}
+Invested: ₹{int(total_inv)}
+
+P/L: ₹{int(total_profit)}
+Return: {round(total_pct,2)}%
+
+━━━━━━━━━━━━━━━━━━━
+🤖 AI DECISION
+
+Short-Term: {st_action} ₹{st_amt}
+Reason: {st_reason}
+
+Long-Term: {lt_action}
+Reason: {lt_reason}
 """
 
-        await context.bot.send_message(
-            chat_id=USER_ID,
-            text=msg,
-            reply_markup=InlineKeyboardMarkup(keyboard),
-        )
+    keyboard = []
 
-    except Exception as e:
-        print("Dashboard error:", e)
+    if lt_action == "BUY":
+        keyboard.append([InlineKeyboardButton("🟢 LT BUY ₹15000", callback_data="lt_buy")])
 
+    if st_action == "BUY":
+        keyboard.append([InlineKeyboardButton(f"🟢 BUY ₹{st_amt}", callback_data=f"buy_{st_amt}")])
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != USER_ID:
-        return
-    await dashboard(context)
+    if st_action == "SELL":
+        keyboard.append([InlineKeyboardButton(f"🔴 SELL ₹{st_amt}", callback_data=f"sell_{st_amt}")])
 
-
-async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-
-    price = logic.get_price()
-    cash, _ = sheets.get_short_term_summary()
-
-    if query.data == "lt_buy":
-        sheets.add_long(price)
-        await query.message.reply_text("✅ LT BUY recorded")
-
-    elif query.data == "buy":
-        if cash < 500:
-            await query.message.reply_text("⛔ Not enough cash")
-            return
-        sheets.add_short("BUY", 2000, price)
-        await query.message.reply_text("✅ BUY recorded")
-
-    elif query.data == "sell":
-        sheets.add_short("SELL", 1000, price)
-        await query.message.reply_text("✅ SELL recorded")
-
-
-async def scheduler_job(context: ContextTypes.DEFAULT_TYPE):
-    await dashboard(context)
-
-
-def main():
-    app = ApplicationBuilder().token(TOKEN).build()
-
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CallbackQueryHandler(button_handler))
-
-    app.job_queue.run_repeating(scheduler_job, interval=3600, first=10)
-
-    print("Bot running 🚀")
-    app.run_polling()
-
-
-if __name__ == "__main__":
-    main()
+    await context.bot.send_message(
+        chat_id=USER_ID,
+        text=msg,
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
