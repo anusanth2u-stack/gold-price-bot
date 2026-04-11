@@ -1,5 +1,6 @@
 from datetime import datetime
 
+
 def get_trend(price, history):
     if len(history) < 2:
         return "FLAT", "Not enough data"
@@ -25,32 +26,33 @@ def short_term_ai(cash, pct, trend):
     return "HOLD", 0, "No strong signal"
 
 
-from datetime import datetime
-
-
-def long_term_ai(already_bought, price, avg_price, trend):
+def long_term_ai(already_bought, price, avg_price, trend, history):
     today = datetime.now().day
 
-    # ✅ Already done
     if already_bought:
         return "DONE", 0, "Already invested this month"
 
-    # 📉 Cheap compared to your average
+    recent = history[-5:] if len(history) >= 5 else history
+
+    volatility = max(recent) - min(recent) if len(recent) > 1 else 0
+    momentum = price - recent[0] if recent else 0
+
     if avg_price and price < avg_price * 0.98:
-        return "BUY", 15000, "Price below your average — good accumulation zone"
+        return "BUY", 15000, "Below average — strong accumulation"
 
-    # 📉 Market falling → buy dip
-    if trend.startswith("DOWN"):
-        return "BUY", 15000, "Market dip — good long-term entry"
+    if trend.startswith("DOWN") and volatility > 100:
+        return "BUY", 15000, "Dip buying opportunity"
 
-    # 📈 Market rising → wait for better price
-    if trend.startswith("UP") and price > avg_price * 1.02:
-        if today < 20:
-            return "WAIT", 0, "Price slightly high — waiting for pullback"
-    
-    # ⏰ Deadline enforcement
+    if trend == "SIDEWAYS" and volatility < 80:
+        return "BUY", 15000, "Stable accumulation zone"
+
+    if avg_price and price > avg_price * 1.05 and today < 20:
+        return "WAIT", 0, "Price high — waiting"
+
+    if momentum > 200 and today < 20:
+        return "WAIT", 0, "Avoid buying at spike"
+
     if today >= 20:
-        return "BUY", 15000, "Deadline approaching — monthly discipline buy"
+        return "BUY", 15000, "Deadline approaching"
 
-    # Default
-    return "WAIT", 0, "No strong opportunity yet"
+    return "WAIT", 0, "No strong signal"
