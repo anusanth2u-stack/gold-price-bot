@@ -21,7 +21,7 @@ def get_gold_price():
 
 
 def send_telegram(price):
-    TOKEN = "8745874680:AAGabWeeKDwUYEHOcpYfpEPYOl9O3mX9-M8"   # 🔴 Replace this
+    TOKEN = "8745874680:AAE1ICZiXUf3Xu8kHylh6mLYp7ZQNi1FxZ0"   # 🔴 Replace this
     CHAT_ID = "5400949107"
 
     message = f"💰 Gold Price Update\n1g (22K): ₹{price}"
