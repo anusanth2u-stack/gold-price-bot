@@ -1,4 +1,7 @@
 import os
+import requests
+from bs4 import BeautifulSoup
+
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
 
@@ -9,33 +12,87 @@ TOKEN = os.environ.get("TELEGRAM_TOKEN")
 USER_ID = 5400949107
 
 
+# ✅ REAL PRICE FETCH (NO FALLBACK)
 def get_price():
-    # SAFE PLACEHOLDER (replace later with API)
-    return 14000
+    try:
+        url = "https://www.keralagold.com/kerala-gold-rate-per-gram.htm"
+
+        headers = {
+            "User-Agent": "Mozilla/5.0"
+        }
+
+        res = requests.get(url, headers=headers, timeout=10)
+
+        if res.status_code != 200:
+            return None
+
+        soup = BeautifulSoup(res.text, "html.parser")
+
+        tables = soup.find_all("table")
+
+        for table in tables:
+            rows = table.find_all("tr")
+
+            for row in rows:
+                cols = row.find_all("td")
+
+                if len(cols) >= 2:
+                    text = cols[0].get_text(strip=True)
+
+                    # Look for 22K gold price
+                    if "22" in text:
+                        price_text = cols[1].get_text(strip=True)
+
+                        price = (
+                            price_text.replace("₹", "")
+                            .replace(",", "")
+                            .strip()
+                        )
+
+                        return float(price)
+
+        return None
+
+    except Exception as e:
+        print("PRICE FETCH ERROR:", e)
+        return None
 
 
 async def send_dashboard(context: ContextTypes.DEFAULT_TYPE):
     try:
         price = get_price()
 
+        # ❌ STRICT: NO DATA → NO SHEET UPDATE
         if not price:
-            await context.bot.send_message(chat_id=USER_ID, text="⚠️ No gold price data available")
+            await context.bot.send_message(
+                chat_id=USER_ID,
+                text="⚠️ No gold price data available today. No updates made."
+            )
             return
 
+        # ✅ Budget handled monthly
         sheets.add_budget()
 
+        # ✅ Get history
         history = sheets.get_history()
 
+        # ✅ Trend calculation
         trend, reason = logic.get_trend(price, history)
 
+        # ✅ Log ONLY when price exists
+        sheets.log_data(price, trend)
+
+        # ✅ Metrics
         st_inv, st_cash, st_gold, st_value, st_profit, st_pct = sheets.get_st_metrics(price)
         lt_inv, lt_gold, lt_value, lt_profit, lt_pct = sheets.get_lt_metrics(price)
 
         bought = sheets.already_bought()
 
+        # ✅ AI decisions
         st_action, st_amt, st_reason = logic.short_term_ai(st_cash, st_pct, trend)
         lt_action, lt_amt, lt_reason = logic.long_term_ai(bought)
 
+        # ✅ Total portfolio
         total_val = st_value + lt_value
         total_inv = st_inv + lt_inv
         total_profit = total_val - total_inv
@@ -97,7 +154,11 @@ Reason: {lt_reason}
         if st_action == "SELL":
             keyboard.append([InlineKeyboardButton(f"🔴 SELL ₹{st_amt}", callback_data=f"sell_{st_amt}")])
 
-        await context.bot.send_message(chat_id=USER_ID, text=msg, reply_markup=InlineKeyboardMarkup(keyboard))
+        await context.bot.send_message(
+            chat_id=USER_ID,
+            text=msg,
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
 
     except Exception as e:
         print("ERROR:", e)
@@ -118,6 +179,10 @@ async def button(update, context):
     price = get_price()
 
     try:
+        if not price:
+            await q.message.reply_text("⚠️ Cannot execute — price not available")
+            return
+
         if q.data == "lt_buy":
             sheets.add_long(price)
             await q.message.reply_text("LT BUY DONE")
