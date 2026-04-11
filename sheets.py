@@ -4,6 +4,13 @@ import os
 from datetime import datetime
 
 
+def safe_float(val):
+    try:
+        return float(val)
+    except:
+        return 0.0
+
+
 def get_client():
     creds_json = os.environ.get("GOOGLE_CREDENTIALS")
 
@@ -12,49 +19,36 @@ def get_client():
 
     scope = [
         "https://spreadsheets.google.com/feeds",
-        "https://www.googleapis.com/auth/drive"
+        "https://www.googleapis.com/auth/drive",
     ]
 
     creds = ServiceAccountCredentials.from_json_keyfile_name("cred.json", scope)
     return gspread.authorize(creds)
 
 
-# -------- HISTORY --------
 def get_history():
     sheet = get_client().open("Gold Tracker").worksheet("Data")
-    values = sheet.col_values(2)[1:]
-    return [int(v) for v in values[-10:] if v]
+    rows = sheet.get_all_values()[1:]
+
+    prices = []
+    for row in rows[-10:]:
+        if row and len(row) > 1 and row[1]:
+            prices.append(safe_float(row[1]))
+
+    return prices
 
 
-# -------- LEARNING --------
-def get_learning_factor(current_price):
-    sheet = get_client().open("Gold Tracker").worksheet("Short Term")
-    data = sheet.get_all_records()
+def log_price(price, score):
+    sheet = get_client().open("Gold Tracker").worksheet("Data")
 
-    if not data:
-        return 0
-
-    score = 0
-    count = 0
-
-    for row in data:
-        if row["Type"] == "BUY":
-            buy_price = float(row["Price"])
-
-            # evaluate after buy
-            diff = current_price - buy_price
-
-            if diff > 100:
-                score += 5   # good buy
-            elif diff < -100:
-                score -= 5   # bad buy
-
-            count += 1
-
-    return score // count if count else 0
+    sheet.append_row([
+        datetime.now().strftime("%Y-%m-%d %H:%M"),
+        price,
+        "",
+        score
+    ])
 
 
-# -------- SHORT TERM --------
 def get_short_term_summary():
     sheet = get_client().open("Gold Tracker").worksheet("Short Term")
     data = sheet.get_all_records()
@@ -63,7 +57,8 @@ def get_short_term_summary():
         return 0, 0
 
     last = data[-1]
-    return float(last["Cash Balance"] or 0), float(last["Gold Holding"] or 0)
+
+    return safe_float(last.get("Cash Balance")), safe_float(last.get("Gold Holding"))
 
 
 def add_short(txn, amount, price):
@@ -82,7 +77,6 @@ def add_short(txn, amount, price):
     ])
 
 
-# -------- LONG TERM --------
 def add_long(price):
     sheet = get_client().open("Gold Tracker").worksheet("Long Term")
 
@@ -101,8 +95,8 @@ def get_long_summary():
     sheet = get_client().open("Gold Tracker").worksheet("Long Term")
     data = sheet.get_all_records()
 
-    invested = sum(float(r["Amount"]) for r in data) if data else 0
-    grams = sum(float(r["Grams"]) for r in data) if data else 0
+    invested = sum(safe_float(r.get("Amount")) for r in data)
+    grams = sum(safe_float(r.get("Grams")) for r in data)
 
     return invested, grams
 
@@ -114,14 +108,38 @@ def already_bought():
     today = datetime.now()
 
     for r in data:
-        d = datetime.strptime(r["Date"], "%Y-%m-%d")
-        if d.month == today.month:
-            return True
+        try:
+            d = datetime.strptime(r["Date"], "%Y-%m-%d")
+            if d.month == today.month:
+                return True
+        except:
+            pass
 
     return False
 
 
-# -------- PORTFOLIO --------
+def get_learning_factor(current_price):
+    sheet = get_client().open("Gold Tracker").worksheet("Short Term")
+    data = sheet.get_all_records()
+
+    score = 0
+    count = 0
+
+    for row in data:
+        if row.get("Type") == "BUY":
+            buy_price = safe_float(row.get("Price"))
+            diff = current_price - buy_price
+
+            if diff > 100:
+                score += 5
+            elif diff < -100:
+                score -= 5
+
+            count += 1
+
+    return int(score / count) if count else 0
+
+
 def get_portfolio(price):
     st_cash, st_gold = get_short_term_summary()
     lt_inv, lt_gold = get_long_summary()
@@ -133,15 +151,3 @@ def get_portfolio(price):
     pct = (profit / lt_inv * 100) if lt_inv else 0
 
     return total_gold, value, profit, pct, st_cash
-
-
-# -------- DATA --------
-def log_price(price, score):
-    sheet = get_client().open("Gold Tracker").worksheet("Data")
-
-    sheet.append_row([
-        datetime.now().strftime("%Y-%m-%d %H:%M"),
-        price,
-        "",
-        score
-    ])
