@@ -2,6 +2,7 @@ import os
 import requests
 from bs4 import BeautifulSoup
 import re
+from datetime import datetime, time
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
@@ -13,6 +14,7 @@ TOKEN = os.environ.get("TELEGRAM_TOKEN")
 USER_ID = 5400949107
 
 
+# ---------------- PRICE ----------------
 def extract_number(text):
     match = re.search(r"\d{1,3}(?:,\d{3})*", text)
     if match:
@@ -27,7 +29,6 @@ def get_price():
         soup = BeautifulSoup(res.text, "html.parser")
 
         rows = soup.find_all("tr")
-
         today_price = None
         latest_price = None
 
@@ -47,174 +48,130 @@ def get_price():
             if "today" in label:
                 today_price = price
 
-        if today_price:
-            return today_price
+        return today_price or latest_price
 
-        if latest_price:
-            return latest_price
-
-    except Exception as e:
-        print("KeralaGold error:", e)
+    except:
+        pass
 
     try:
         url = "https://timesofindia.indiatimes.com/business/gold-rates-today/gold-price-in-bangalore.cms"
-        res = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
+        res = requests.get(url)
 
-        numbers = re.findall(r"\d{1,3}(?:,\d{3})", res.text)
-
-        for num in numbers:
-            val = float(num.replace(",", ""))
+        nums = re.findall(r"\d{1,3}(?:,\d{3})", res.text)
+        for n in nums:
+            val = float(n.replace(",", ""))
             if 3000 < val < 20000:
                 return val
-
-    except Exception as e:
-        print("TOI error:", e)
+    except:
+        pass
 
     return None
 
 
+# ---------------- WINDOW CHECK ----------------
+def is_window_open():
+    now = datetime.now()
+    return now.hour in [10, 12, 14, 16, 18]
+
+
+# ---------------- DASHBOARD ----------------
 async def send_dashboard(context: ContextTypes.DEFAULT_TYPE):
-    try:
-        price = get_price()
+    price = get_price()
 
-        if not price:
-            await context.bot.send_message(
-                chat_id=USER_ID,
-                text="⚠️ No gold price data available today. No updates made."
-            )
-            return
+    if not price:
+        await context.bot.send_message(chat_id=USER_ID, text="⚠️ No price data")
+        return
 
-        sheets.add_budget()
+    sheets.add_budget()
 
-        history = sheets.get_history()
-        trend, reason = logic.get_trend(price, history)
+    history = sheets.get_history()
+    trend, reason = logic.get_trend(price, history)
+    sheets.log_data(price, trend)
 
-        sheets.log_data(price, trend)
+    st_inv, st_cash, st_gold, st_val, st_profit, st_pct = sheets.get_st_metrics(price)
+    lt_inv, lt_gold, lt_val, lt_profit, lt_pct = sheets.get_lt_metrics(price)
 
-        st_inv, st_cash, st_gold, st_value, st_profit, st_pct = sheets.get_st_metrics(price)
-        lt_inv, lt_gold, lt_value, lt_profit, lt_pct = sheets.get_lt_metrics(price)
+    avg_price = sheets.get_avg_buy_price()
+    bought = sheets.already_bought()
 
-        avg_price = sheets.get_avg_buy_price()
-        bought = sheets.already_bought()
+    st_action, st_amt, st_reason = logic.short_term_ai(st_cash, st_pct, trend)
+    lt_action, lt_amt, lt_reason = logic.long_term_ai(bought, price, avg_price, trend, history)
 
-        st_action, st_amt, st_reason = logic.short_term_ai(st_cash, st_pct, trend)
+    total_val = st_val + lt_val
+    total_profit = total_val - (st_inv + lt_inv)
 
-        lt_action, lt_amt, lt_reason = logic.long_term_ai(
-            bought, price, avg_price, trend, history
-        )
+    msg = f"""
+💎 GOLD AI
 
-        total_val = st_value + lt_value
-        total_inv = st_inv + lt_inv
-        total_profit = total_val - total_inv
+Price: ₹{price}
 
-        msg = f"""
-💎 GOLD AI PORTFOLIO ENGINE
+Trend: {trend}
+{reason}
 
-💰 Price: ₹{price}
+LONG TERM → {lt_action}
+SHORT TERM → {st_action}
 
-📉 Trend: {trend}
-🧠 {reason}
-
-━━━━━━━━━━━━━━━
-🟢 LONG TERM
-
-Invested: ₹{int(lt_inv)}
-Gold: {round(lt_gold,3)}g
-Value: ₹{int(lt_value)}
-
-P/L: ₹{int(lt_profit)} ({round(lt_pct,2)}%)
-
-Action: {lt_action}
-Reason: {lt_reason}
-
-━━━━━━━━━━━━━━━
-🔴 SHORT TERM
-
-Cash: ₹{int(st_cash)}
-Gold: {round(st_gold,3)}g
-
-Value: ₹{int(st_value)}
-P/L: ₹{int(st_profit)}
-Return: {round(st_pct,2)}%
-
-━━━━━━━━━━━━━━━
-💎 TOTAL
-
-Value: ₹{int(total_val)}
+TOTAL VALUE: ₹{int(total_val)}
 P/L: ₹{int(total_profit)}
-
-━━━━━━━━━━━━━━━
-🤖 AI DECISION
-
-Short-Term: {st_action} ₹{st_amt}
-Reason: {st_reason}
-
-Long-Term: {lt_action}
-Reason: {lt_reason}
 """
 
-        keyboard = []
+    keyboard = []
 
-        if lt_action == "BUY":
-            keyboard.append([InlineKeyboardButton("🟢 LT BUY ₹15000", callback_data="lt_buy")])
+    if lt_action == "BUY":
+        keyboard.append([InlineKeyboardButton("LT BUY", callback_data="lt_buy")])
 
-        if st_action == "BUY":
-            keyboard.append([InlineKeyboardButton(f"🟢 BUY ₹{st_amt}", callback_data=f"buy_{st_amt}")])
+    if st_action == "BUY":
+        keyboard.append([InlineKeyboardButton("BUY", callback_data=f"buy_{st_amt}")])
 
-        if st_action == "SELL":
-            keyboard.append([InlineKeyboardButton(f"🔴 SELL ₹{st_amt}", callback_data=f"sell_{st_amt}")])
+    if st_action == "SELL":
+        keyboard.append([InlineKeyboardButton("SELL", callback_data=f"sell_{st_amt}")])
 
-        await context.bot.send_message(chat_id=USER_ID, text=msg, reply_markup=InlineKeyboardMarkup(keyboard))
-
-    except Exception as e:
-        print("ERROR:", e)
+    await context.bot.send_message(chat_id=USER_ID, text=msg, reply_markup=InlineKeyboardMarkup(keyboard))
 
 
-async def start(update, context):
-    await send_dashboard(context)
-
-
-async def scheduler(context):
-    await send_dashboard(context)
-
-
+# ---------------- BUTTON ----------------
 async def button(update, context):
     q = update.callback_query
     await q.answer()
 
+    if not is_window_open():
+        await q.message.reply_text("Window closed. Wait next slot.")
+        return
+
     price = get_price()
 
-    try:
-        if not price:
-            await q.message.reply_text("⚠️ Cannot execute — price not available")
-            return
+    if q.data == "lt_buy":
+        sheets.add_long(price)
+        await q.message.reply_text("LT BUY DONE")
 
-        if q.data == "lt_buy":
-            sheets.add_long(price)
-            await q.message.reply_text("LT BUY DONE")
+    elif "buy_" in q.data:
+        amt = int(q.data.split("_")[1])
+        sheets.add_short("BUY", amt, price)
+        await q.message.reply_text(f"BUY {amt}")
 
-        elif "buy_" in q.data:
-            amt = int(q.data.split("_")[1])
-            sheets.add_short("BUY", amt, price)
-            await q.message.reply_text(f"BUY ₹{amt}")
+    elif "sell_" in q.data:
+        amt = int(q.data.split("_")[1])
+        sheets.add_short("SELL", amt, price)
+        await q.message.reply_text(f"SELL {amt}")
 
-        elif "sell_" in q.data:
-            amt = int(q.data.split("_")[1])
-            sheets.add_short("SELL", amt, price)
-            await q.message.reply_text(f"SELL ₹{amt}")
 
-    except Exception as e:
-        await q.message.reply_text(str(e))
+# ---------------- SCHEDULER ----------------
+async def window_job(context):
+    print("Window triggered")
+    await send_dashboard(context)
 
 
 def main():
     app = ApplicationBuilder().token(TOKEN).build()
 
-    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("start", send_dashboard))
     app.add_handler(CallbackQueryHandler(button))
 
     if app.job_queue:
-        app.job_queue.run_repeating(scheduler, interval=3600, first=10)
+        times = [time(10,0), time(12,0), time(14,0), time(16,0), time(18,0)]
+
+        for t in times:
+            app.job_queue.run_daily(window_job, time=t)
 
     print("Bot running 🚀")
     app.run_polling()
