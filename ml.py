@@ -11,12 +11,12 @@ def analyze_trades(st_data):
             elif r["Type"] == "SELL":
                 sells.append(float(r["Price"]))
         except:
-            continue
+            pass
 
     total = min(len(buys), len(sells))
     wins = sum(1 for i in range(total) if sells[i] > buys[i])
 
-    win_rate = int((wins / total) * 100) if total else 0
+    win_rate = int((wins / total) * 100) if total else 50
     avg_buy = np.mean(buys) if buys else 0
 
     return avg_buy, win_rate
@@ -24,35 +24,43 @@ def analyze_trades(st_data):
 
 def get_prediction(history, st_data):
     if len(history) < 5:
-        return "NA", "NA", "Not enough data", 0, "NA"
+        return 0, 0, "NA", 50, "Score:50%"
 
     prices = np.array(history[-15:])
     diffs = np.diff(prices)
 
     avg_change = np.mean(diffs)
     volatility = np.std(prices)
-    last_price = prices[-1]
+    last = prices[-1]
 
-    next_price = last_price + avg_change
-    low = int(next_price - volatility)
-    high = int(next_price + volatility)
+    low = int(last - volatility)
+    high = int(last + volatility)
 
     avg_buy, win_rate = analyze_trades(st_data)
 
-    buy_low = int(avg_buy * 0.97) if avg_buy else int(last_price * 0.97)
-    buy_high = int(avg_buy) if avg_buy else int(last_price)
+    score = min(95, max(50, int(win_rate + 50 - volatility)))
 
-    if avg_buy and last_price < avg_buy:
-        signal = "Good Buy Zone"
-    elif avg_buy and last_price > avg_buy * 1.05:
-        signal = "Overvalued"
+    extra = f"Score:{score}% | BuyZone:{int(last*0.95)}-{int(last)} | Size:MEDIUM"
+
+    return low, high, "Neutral", win_rate, extra
+
+
+def long_term_ml(price, history, avg_price):
+    if len(history) < 5:
+        return "NA", "NA", "NA", "Low"
+
+    trend = "Strong" if history[-1] > history[0] else "Weak"
+
+    if avg_price:
+        if price < avg_price * 0.95:
+            val = "Undervalued"
+        elif price > avg_price * 1.05:
+            val = "Overvalued"
+        else:
+            val = "Fair"
     else:
-        signal = "Neutral"
+        val = "NA"
 
-    score = min(95, max(50, int(win_rate + 50 - volatility / 10)))
+    zone = f"{int(price*0.96)}-{int(price*0.99)}"
 
-    size = "HIGH" if win_rate > 70 else "MEDIUM" if win_rate > 50 else "LOW"
-
-    extra = f"Score:{score}% | BuyZone:{buy_low}-{buy_high} | Size:{size}"
-
-    return low, high, signal, win_rate, extra
+    return trend, val, zone, "Medium"
