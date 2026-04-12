@@ -4,6 +4,9 @@ from bs4 import BeautifulSoup
 import re
 from datetime import datetime, time
 import pytz
+import uuid
+import redis
+import atexit
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -21,6 +24,59 @@ TOKEN = os.environ.get("TELEGRAM_TOKEN")
 USER_ID = 5400949107
 
 IST = pytz.timezone("Asia/Kolkata")
+
+# ---------------- REDIS LOCK ----------------
+REDIS_URL = os.environ.get("REDIS_URL")
+LOCK_KEY = "gold_ai_bot_lock"
+INSTANCE_ID = str(uuid.uuid4())
+redis_client = redis.from_url(REDIS_URL) if REDIS_URL else None
+
+
+def acquire_lock():
+    if not redis_client:
+        print("Redis not configured. Skipping duplicate-instance lock.")
+        return True
+
+    try:
+        locked = redis_client.set(LOCK_KEY, INSTANCE_ID, nx=True, ex=3600)
+        if locked:
+            print("Redis lock acquired")
+            return True
+
+        current_owner = redis_client.get(LOCK_KEY)
+        print(f"Another instance is active. Lock owner: {current_owner}")
+        return False
+    except Exception as e:
+        print("Redis lock error:", e)
+        return True
+
+
+def refresh_lock():
+    if not redis_client:
+        return
+
+    try:
+        current_owner = redis_client.get(LOCK_KEY)
+        if current_owner and current_owner.decode() == INSTANCE_ID:
+            redis_client.expire(LOCK_KEY, 3600)
+    except Exception as e:
+        print("Redis refresh error:", e)
+
+
+def release_lock():
+    if not redis_client:
+        return
+
+    try:
+        current_owner = redis_client.get(LOCK_KEY)
+        if current_owner and current_owner.decode() == INSTANCE_ID:
+            redis_client.delete(LOCK_KEY)
+            print("Redis lock released")
+    except Exception as e:
+        print("Redis release error:", e)
+
+
+atexit.register(release_lock)
 
 
 # ---------------- PRICE SCRAPER ----------------
@@ -85,6 +141,8 @@ def is_window_open():
 
 # ---------------- DASHBOARD ----------------
 async def send_dashboard(context: ContextTypes.DEFAULT_TYPE):
+    refresh_lock()
+
     price = get_price()
 
     if not price:
@@ -195,16 +253,20 @@ Win Rate: {win_rate}%
 
 # ---------------- COMMANDS ----------------
 async def start(update, context):
+    refresh_lock()
     await send_dashboard(context)
 
 
 async def force(update, context):
+    refresh_lock()
     await update.message.reply_text("⚡ Force update")
     await send_dashboard(context)
 
 
 # ---------------- BUTTON ----------------
 async def button(update, context):
+    refresh_lock()
+
     q = update.callback_query
     await q.answer()
 
@@ -235,13 +297,30 @@ async def button(update, context):
 
 # ---------------- SCHEDULER ----------------
 async def window_job(context):
+    refresh_lock()
     print("Scheduled Trigger")
     await send_dashboard(context)
 
 
+# ---------------- TELEGRAM SESSION CLEANUP ----------------
+async def post_init(app):
+    try:
+        print("Clearing old Telegram webhook/session...")
+        await app.bot.delete_webhook(drop_pending_updates=True)
+        print("Old Telegram session cleared")
+    except Exception as e:
+        print("deleteWebhook error:", e)
+
+
 # ---------------- MAIN ----------------
 def main():
+    if not acquire_lock():
+        print("Exiting: duplicate bot instance detected")
+        return
+
     app = ApplicationBuilder().token(TOKEN).build()
+
+    app.post_init = post_init
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("force", force))
