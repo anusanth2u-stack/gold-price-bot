@@ -2,6 +2,10 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import os
 from datetime import datetime
+import pytz
+
+# IST TIMEZONE
+IST = pytz.timezone("Asia/Kolkata")
 
 
 def safe(x):
@@ -26,10 +30,11 @@ def client():
     return gspread.authorize(auth)
 
 
+# ---------------- DATA ----------------
 def log_data(price, trend):
     sheet = client().open("Gold Tracker").worksheet("Data")
     sheet.append_row([
-        datetime.now().strftime("%Y-%m-%d %H:%M"),
+        datetime.now(IST).strftime("%Y-%m-%d %H:%M"),
         price,
         trend,
         50
@@ -50,6 +55,7 @@ def get_history():
     return prices
 
 
+# ---------------- SHORT TERM ----------------
 def get_last_st():
     sheet = client().open("Gold Tracker").worksheet("Short Term")
     data = sheet.get_all_records()
@@ -65,7 +71,7 @@ def add_budget():
     sheet = client().open("Gold Tracker").worksheet("Short Term")
     data = sheet.get_all_records()
 
-    today = datetime.now()
+    today = datetime.now(IST)
 
     for r in data[::-1]:
         if r["Type"] == "BUDGET":
@@ -109,7 +115,7 @@ def add_short(txn, amount, price):
         gold -= grams
 
     sheet.append_row([
-        datetime.now().strftime("%Y-%m-%d"),
+        datetime.now(IST).strftime("%Y-%m-%d"),
         txn,
         price,
         amount,
@@ -138,6 +144,7 @@ def get_st_history():
     return sheet.get_all_records()
 
 
+# ---------------- LONG TERM ----------------
 def get_lt_metrics(price):
     sheet = client().open("Gold Tracker").worksheet("Long Term")
     data = sheet.get_all_records()
@@ -166,7 +173,7 @@ def already_bought():
     sheet = client().open("Gold Tracker").worksheet("Long Term")
     data = sheet.get_all_records()
 
-    today = datetime.now()
+    today = datetime.now(IST)
 
     for r in data[::-1]:
         try:
@@ -185,7 +192,7 @@ def add_long(price):
     grams = round(15000 / price, 3)
 
     sheet.append_row([
-        datetime.now().strftime("%Y-%m-%d"),
+        datetime.now(IST).strftime("%Y-%m-%d"),
         price,
         15000,
         grams
