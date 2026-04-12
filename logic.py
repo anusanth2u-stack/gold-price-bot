@@ -30,7 +30,7 @@ def long_term_ai(already_bought, price, avg_price, trend, history):
     today = datetime.now().day
 
     if already_bought:
-        return "DONE", 0, "Already invested this month"
+        return "DONE", 0, "Stable accumulation zone"
 
     if avg_price and price < avg_price * 0.98:
         return "BUY", 15000, "Stable accumulation zone"
