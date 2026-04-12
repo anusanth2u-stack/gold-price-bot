@@ -13,7 +13,6 @@ def get_trend(price, history):
     return "SIDEWAYS", "No clear direction"
 
 
-# ---------------- POSITION SIZE ----------------
 def position_size(cash, score, win_rate, trend):
     if score >= 80:
         base = 0.5
@@ -38,7 +37,6 @@ def position_size(cash, score, win_rate, trend):
     return int(cash * base)
 
 
-# ---------------- RISK CONTROL ----------------
 def risk_control(score, win_rate, trend):
     if score < 50:
         return False, "Low ML confidence"
@@ -52,7 +50,6 @@ def risk_control(score, win_rate, trend):
     return True, "Safe to trade"
 
 
-# ---------------- SL TARGET ----------------
 def get_sl_target(price, trend):
     if trend == "DOWN":
         return int(price * 0.97), int(price * 1.03)
@@ -62,7 +59,6 @@ def get_sl_target(price, trend):
         return int(price * 0.975), int(price * 1.02)
 
 
-# ---------------- SHORT TERM ----------------
 def short_term_ai(cash, pct, trend, score, win_rate, price):
     if pct >= 5:
         return "SELL", int(cash * 0.4), "Profit booking", None, None
@@ -79,7 +75,6 @@ def short_term_ai(cash, pct, trend, score, win_rate, price):
     return "HOLD", 0, "No strong signal", None, None
 
 
-# ---------------- LONG TERM ----------------
 def long_term_ai(bought, price, avg_price, trend, history):
     today = datetime.now().day
 
