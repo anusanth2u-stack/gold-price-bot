@@ -26,7 +26,6 @@ def client():
     return gspread.authorize(auth)
 
 
-# ---------- DATA ----------
 def log_data(price, trend):
     sheet = client().open("Gold Tracker").worksheet("Data")
 
@@ -43,7 +42,7 @@ def get_history():
     data = sheet.get_all_values()[1:]
 
     prices = []
-    for r in data[-10:]:
+    for r in data[-20:]:
         try:
             prices.append(float(r[1]))
         except:
@@ -52,7 +51,6 @@ def get_history():
     return prices
 
 
-# ---------- SHORT TERM ----------
 def get_last_st():
     sheet = client().open("Gold Tracker").worksheet("Short Term")
     data = sheet.get_all_records()
@@ -72,9 +70,12 @@ def add_budget():
 
     for r in data[::-1]:
         if r["Type"] == "BUDGET":
-            d = datetime.strptime(r["Date"], "%Y-%m-%d")
-            if d.month == today.month:
-                return
+            try:
+                d = datetime.strptime(r["Date"], "%Y-%m-%d")
+                if d.month == today.month:
+                    return
+            except:
+                pass
 
     cash, gold = get_last_st()
     cash += 5000
@@ -133,7 +134,6 @@ def get_st_metrics(price):
     return invested, cash, gold, value, profit, pct
 
 
-# ---------- LONG TERM ----------
 def get_lt_metrics(price):
     sheet = client().open("Gold Tracker").worksheet("Long Term")
     data = sheet.get_all_records()
@@ -148,6 +148,19 @@ def get_lt_metrics(price):
     return inv, gold, val, profit, pct
 
 
+def get_avg_buy_price():
+    sheet = client().open("Gold Tracker").worksheet("Long Term")
+    data = sheet.get_all_records()
+
+    total_amount = sum([safe(r["Amount"]) for r in data])
+    total_gold = sum([safe(r["Grams"]) for r in data])
+
+    if total_gold == 0:
+        return 0
+
+    return total_amount / total_gold
+
+
 def already_bought():
     sheet = client().open("Gold Tracker").worksheet("Long Term")
     data = sheet.get_all_records()
@@ -155,9 +168,12 @@ def already_bought():
     today = datetime.now()
 
     for r in data[::-1]:
-        d = datetime.strptime(r["Date"], "%Y-%m-%d")
-        if d.month == today.month:
-            return True
+        try:
+            d = datetime.strptime(r["Date"], "%Y-%m-%d")
+            if d.month == today.month:
+                return True
+        except:
+            pass
 
     return False
 
@@ -173,16 +189,3 @@ def add_long(price):
         15000,
         grams
     ])
-
-
-def get_avg_buy_price():
-    sheet = client().open("Gold Tracker").worksheet("Long Term")
-    data = sheet.get_all_records()
-
-    total_amount = sum([safe(r["Amount"]) for r in data])
-    total_gold = sum([safe(r["Grams"]) for r in data])
-
-    if total_gold == 0:
-        return 0
-
-    return total_amount / total_gold
