@@ -1,5 +1,7 @@
+requests
+beautifulsoup4
 python-telegram-bot[job-queue]==20.3
 gspread
 oauth2client
-requests
-beautifulsoup4
+numpy
+pytz
