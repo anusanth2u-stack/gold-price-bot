@@ -56,7 +56,6 @@ def get_price():
     except Exception as e:
         print("KeralaGold error:", e)
 
-    # fallback
     try:
         url = "https://timesofindia.indiatimes.com/business/gold-rates-today/gold-price-in-bangalore.cms"
         res = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
@@ -86,20 +85,23 @@ async def send_dashboard(context: ContextTypes.DEFAULT_TYPE):
             return
 
         sheets.add_budget()
-        history = sheets.get_history()
 
+        history = sheets.get_history()
         trend, reason = logic.get_trend(price, history)
+
         sheets.log_data(price, trend)
 
         st_inv, st_cash, st_gold, st_value, st_profit, st_pct = sheets.get_st_metrics(price)
         lt_inv, lt_gold, lt_value, lt_profit, lt_pct = sheets.get_lt_metrics(price)
 
+        avg_price = sheets.get_avg_buy_price()
         bought = sheets.already_bought()
 
         st_action, st_amt, st_reason = logic.short_term_ai(st_cash, st_pct, trend)
-        avg_price = sheets.get_avg_buy_price()
 
-        lt_action,lt_amt,lt_reason = logic.long_term_ai(bought,price,avg_price,trend)
+        lt_action, lt_amt, lt_reason = logic.long_term_ai(
+            bought, price, avg_price, trend, history
+        )
 
         total_val = st_value + lt_value
         total_inv = st_inv + lt_inv
