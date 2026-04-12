@@ -28,7 +28,6 @@ def client():
 
 def log_data(price, trend):
     sheet = client().open("Gold Tracker").worksheet("Data")
-
     sheet.append_row([
         datetime.now().strftime("%Y-%m-%d %H:%M"),
         price,
@@ -134,6 +133,11 @@ def get_st_metrics(price):
     return invested, cash, gold, value, profit, pct
 
 
+def get_st_history():
+    sheet = client().open("Gold Tracker").worksheet("Short Term")
+    return sheet.get_all_records()
+
+
 def get_lt_metrics(price):
     sheet = client().open("Gold Tracker").worksheet("Long Term")
     data = sheet.get_all_records()
@@ -155,10 +159,7 @@ def get_avg_buy_price():
     total_amount = sum([safe(r["Amount"]) for r in data])
     total_gold = sum([safe(r["Grams"]) for r in data])
 
-    if total_gold == 0:
-        return 0
-
-    return total_amount / total_gold
+    return total_amount / total_gold if total_gold else 0
 
 
 def already_bought():
