@@ -31,12 +31,13 @@ async def post_init(app):
         print("Cleanup error:", e)
 
 
-# ---------------- GOLD PRICE (KERALA + FALLBACK) ----------------
+# ---------------- PRICE HELPERS ----------------
 def extract_number(text):
     match = re.search(r"\d{1,3}(?:,\d{3})*", text)
     return float(match.group().replace(",", "")) if match else None
 
 
+# ---------------- GOLD PRICE ----------------
 def get_gold_price():
     try:
         url = "https://www.keralagold.com/kerala-gold-rate-per-gram.htm"
@@ -52,7 +53,7 @@ def get_gold_price():
     except:
         pass
 
-    # Fallback
+    # Fallback → TOI
     try:
         url = "https://timesofindia.indiatimes.com/business/gold-rates-today/gold-price-in-bangalore.cms"
         res = requests.get(url)
@@ -83,7 +84,7 @@ def is_window_open():
     return datetime.now(IST).hour in [10, 12, 14, 16, 18]
 
 
-# ---------------- HELPERS ----------------
+# ---------------- SCORE PARSER ----------------
 def extract_score(extra):
     try:
         return int(extra.split("Score:")[1].split("%")[0])
@@ -101,10 +102,15 @@ async def send_dashboard(context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_message(chat_id=USER_ID, text="⚠️ Price fetch failed")
         return
 
-    history = sheets.get_history()
+    # HISTORIES
+    gold_history = sheets.get_gold_history()
+    bees_history = sheets.get_bees_history()
 
-    trend, reason = logic.get_trend(goldbees_price, history)
+    # TRENDS
+    gold_trend, gold_reason = logic.get_trend(gold_price, gold_history)
+    bees_trend, bees_reason = logic.get_trend(goldbees_price, bees_history)
 
+    # METRICS
     st_inv, st_cash, st_units, st_val, st_profit, st_pct = sheets.get_st_metrics(goldbees_price)
     lt_inv, lt_gold, lt_val, lt_profit, lt_pct = sheets.get_lt_metrics(gold_price)
 
@@ -113,29 +119,35 @@ async def send_dashboard(context: ContextTypes.DEFAULT_TYPE):
 
     # ML
     st_data = sheets.get_st_history()
-    ml_low, ml_high, ml_signal, win_rate, extra = ml.get_prediction(history, st_data)
+    ml_low, ml_high, ml_signal, win_rate, extra = ml.short_term_ml(bees_history, st_data)
 
     score = extract_score(extra)
 
+    lt_trend_ml, lt_valn, lt_zone, lt_conf = ml.long_term_ml(
+        gold_history, avg_price, gold_price
+    )
+
     # AI
     st_action, st_amt, st_reason, sl, tgt = logic.short_term_ai(
-        st_cash, st_pct, trend, score, win_rate, goldbees_price
+        st_cash, st_pct, bees_trend, score, win_rate, goldbees_price
     )
 
     lt_action, lt_amt, lt_reason = logic.long_term_ai(
-        bought, gold_price, avg_price, trend, history
+        bought, gold_price, avg_price, gold_trend, gold_history
     )
 
     # LOG DATA
-    sheets.log_data(gold_price, goldbees_price, trend, score)
+    sheets.log_data(
+        gold_price,
+        gold_trend,
+        score,
+        goldbees_price,
+        bees_trend,
+        score
+    )
 
     total_val = st_val + lt_val
     total_profit = total_val - (st_inv + lt_inv)
-
-    # LONG TERM ML
-    lt_trend, lt_valn, lt_zone, lt_conf = ml.long_term_ml(
-        gold_price, history, avg_price
-    )
 
     # ---------------- UI ----------------
     msg = f"""
@@ -144,8 +156,8 @@ async def send_dashboard(context: ContextTypes.DEFAULT_TYPE):
 💰 Gold: ₹{gold_price}
 📈 GoldBees: ₹{goldbees_price}
 
-📊 Trend (GoldBees): {trend}
-📉 {reason}
+📊 Trend (Gold): {gold_trend}
+📊 Trend (GoldBees): {bees_trend}
 
 ━━━━━━━━━━━━━━━
 🟢 LONG TERM
@@ -200,7 +212,7 @@ Win Rate: {win_rate}%
 ━━━━━━━━━━━━━━━
 🤖 ML INSIGHTS (LONG TERM)
 
-Trend Strength: {lt_trend}
+Trend Strength: {lt_trend_ml}
 Valuation: {lt_valn}
 Accumulation Zone: ₹{lt_zone}
 Confidence: {lt_conf}
