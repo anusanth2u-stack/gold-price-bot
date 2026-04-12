@@ -29,36 +29,32 @@ def client():
     return gspread.authorize(auth)
 
 
-# -------- DATA --------
-def log_data(gold_price, bees_price, trend, score):
+def log_data(gold_price, gold_trend, gold_score, bees_price, bees_trend, bees_score):
     sheet = client().open("Gold Tracker").worksheet("Data")
+
     sheet.append_row([
         datetime.now(IST).strftime("%Y-%m-%d %H:%M"),
         gold_price,
+        gold_trend,
+        gold_score,
         bees_price,
-        trend,
-        score
+        bees_trend,
+        bees_score
     ])
 
 
-def get_history():
-    sheet = client().open("Gold Tracker").worksheet("Data")
-    data = sheet.get_all_values()[1:]
-
-    prices = []
-    for r in data[-20:]:
-        try:
-            prices.append(float(r[2]))
-        except:
-            pass
-
-    return prices
+def get_gold_history():
+    data = client().open("Gold Tracker").worksheet("Data").get_all_values()[1:]
+    return [safe(r[1]) for r in data if r[1]]
 
 
-# -------- SHORT TERM --------
+def get_bees_history():
+    data = client().open("Gold Tracker").worksheet("Data").get_all_values()[1:]
+    return [safe(r[4]) for r in data if r[4]]
+
+
 def get_last_st():
-    sheet = client().open("Gold Tracker").worksheet("Short Term")
-    data = sheet.get_all_records()
+    data = client().open("Gold Tracker").worksheet("Short Term").get_all_records()
     if not data:
         return 0, 0
     last = data[-1]
@@ -90,8 +86,7 @@ def add_short(txn, amount, price):
 
 
 def get_st_metrics(price):
-    sheet = client().open("Gold Tracker").worksheet("Short Term")
-    data = sheet.get_all_records()
+    data = client().open("Gold Tracker").worksheet("Short Term").get_all_records()
 
     invested = sum([safe(r["Amount"]) for r in data if r["Type"] == "BUY"])
     cash, units = get_last_st()
@@ -107,7 +102,6 @@ def get_st_history():
     return client().open("Gold Tracker").worksheet("Short Term").get_all_records()
 
 
-# -------- LONG TERM --------
 def add_long(price):
     sheet = client().open("Gold Tracker").worksheet("Long Term")
     grams = round(15000 / price, 3)
@@ -121,19 +115,20 @@ def add_long(price):
 
 
 def get_lt_metrics(price):
-    sheet = client().open("Gold Tracker").worksheet("Long Term")
-    data = sheet.get_all_records()
+    data = client().open("Gold Tracker").worksheet("Long Term").get_all_records()
 
     inv = sum([safe(r["Amount"]) for r in data])
     gold = sum([safe(r["Grams"]) for r in data])
 
     val = gold * price
-    return inv, gold, val, val - inv, 0
+    profit = val - inv
+    pct = (profit / inv * 100) if inv else 0
+
+    return inv, gold, val, profit, pct
 
 
 def get_avg_buy_price():
-    sheet = client().open("Gold Tracker").worksheet("Long Term")
-    data = sheet.get_all_records()
+    data = client().open("Gold Tracker").worksheet("Long Term").get_all_records()
 
     amt = sum([safe(r["Amount"]) for r in data])
     gold = sum([safe(r["Grams"]) for r in data])
@@ -142,8 +137,7 @@ def get_avg_buy_price():
 
 
 def already_bought():
-    sheet = client().open("Gold Tracker").worksheet("Long Term")
-    data = sheet.get_all_records()
+    data = client().open("Gold Tracker").worksheet("Long Term").get_all_records()
 
     today = datetime.now(IST)
     for r in data[::-1]:
