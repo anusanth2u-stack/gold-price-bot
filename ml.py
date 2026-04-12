@@ -51,12 +51,7 @@ def get_prediction(history, st_data):
 
     score = min(95, max(50, int(win_rate + 50 - volatility / 10)))
 
-    if win_rate > 70:
-        size = "HIGH"
-    elif win_rate > 50:
-        size = "MEDIUM"
-    else:
-        size = "LOW"
+    size = "HIGH" if win_rate > 70 else "MEDIUM" if win_rate > 50 else "LOW"
 
     extra = f"Score:{score}% | BuyZone:{buy_low}-{buy_high} | Size:{size}"
 
