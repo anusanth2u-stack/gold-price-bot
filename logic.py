@@ -33,26 +33,25 @@ def long_term_ai(already_bought, price, avg_price, trend, history):
         return "DONE", 0, "Already invested this month"
 
     recent = history[-5:] if len(history) >= 5 else history
-
     volatility = max(recent) - min(recent) if len(recent) > 1 else 0
     momentum = price - recent[0] if recent else 0
 
     if avg_price and price < avg_price * 0.98:
-        return "BUY", 15000, "Below average — strong accumulation"
+        return "BUY", 15000, "Price below average — strong buy"
 
     if trend.startswith("DOWN") and volatility > 100:
         return "BUY", 15000, "Dip buying opportunity"
 
     if trend == "SIDEWAYS" and volatility < 80:
-        return "BUY", 15000, "Stable accumulation zone"
+        return "BUY", 15000, "Stable accumulation"
 
     if avg_price and price > avg_price * 1.05 and today < 20:
         return "WAIT", 0, "Price high — waiting"
 
     if momentum > 200 and today < 20:
-        return "WAIT", 0, "Avoid buying at spike"
+        return "WAIT", 0, "Avoid peak buying"
 
     if today >= 20:
-        return "BUY", 15000, "Deadline approaching"
+        return "BUY", 15000, "Monthly deadline"
 
     return "WAIT", 0, "No strong signal"
