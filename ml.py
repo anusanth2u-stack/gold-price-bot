@@ -1,66 +1,37 @@
 import numpy as np
 
 
-def analyze_trades(st_data):
-    buys, sells = [], []
-
-    for r in st_data:
-        try:
-            if r["Type"] == "BUY":
-                buys.append(float(r["Price"]))
-            elif r["Type"] == "SELL":
-                sells.append(float(r["Price"]))
-        except:
-            pass
-
-    total = min(len(buys), len(sells))
-    wins = sum(1 for i in range(total) if sells[i] > buys[i])
-
-    win_rate = int((wins / total) * 100) if total else 50
-    avg_buy = np.mean(buys) if buys else 0
-
-    return avg_buy, win_rate
-
-
-def get_prediction(history, st_data):
+def short_term_ml(history, st_data):
     if len(history) < 5:
         return 0, 0, "NA", 50, "Score:50%"
 
     prices = np.array(history[-15:])
-    diffs = np.diff(prices)
-
-    avg_change = np.mean(diffs)
-    volatility = np.std(prices)
     last = prices[-1]
+
+    volatility = np.std(prices)
 
     low = int(last - volatility)
     high = int(last + volatility)
 
-    avg_buy, win_rate = analyze_trades(st_data)
+    score = int(max(50, min(90, 70 - volatility)))
 
-    score = min(95, max(50, int(win_rate + 50 - volatility)))
-
-    extra = f"Score:{score}% | BuyZone:{int(last*0.95)}-{int(last)} | Size:MEDIUM"
-
-    return low, high, "Neutral", win_rate, extra
+    return low, high, "Neutral", 50, f"Score:{score}%"
 
 
-def long_term_ml(price, history, avg_price):
+def long_term_ml(history, avg_price, current):
     if len(history) < 5:
         return "NA", "NA", "NA", "Low"
 
-    trend = "Strong" if history[-1] > history[0] else "Weak"
+    trend = "UP" if history[-1] > history[0] else "DOWN"
 
     if avg_price:
-        if price < avg_price * 0.95:
+        if current < avg_price:
             val = "Undervalued"
-        elif price > avg_price * 1.05:
-            val = "Overvalued"
         else:
             val = "Fair"
     else:
         val = "NA"
 
-    zone = f"{int(price*0.96)}-{int(price*0.99)}"
+    zone = f"{int(current*0.96)}-{int(current*0.99)}"
 
     return trend, val, zone, "Medium"
