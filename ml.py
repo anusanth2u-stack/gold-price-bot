@@ -34,7 +34,6 @@ def get_prediction(history, st_data):
     last_price = prices[-1]
 
     next_price = last_price + avg_change
-
     low = int(next_price - volatility)
     high = int(next_price + volatility)
 
@@ -43,9 +42,9 @@ def get_prediction(history, st_data):
     buy_low = int(avg_buy * 0.97) if avg_buy else int(last_price * 0.97)
     buy_high = int(avg_buy) if avg_buy else int(last_price)
 
-    if last_price < avg_buy:
+    if avg_buy and last_price < avg_buy:
         signal = "Good Buy Zone"
-    elif last_price > avg_buy * 1.05:
+    elif avg_buy and last_price > avg_buy * 1.05:
         signal = "Overvalued"
     else:
         signal = "Neutral"
