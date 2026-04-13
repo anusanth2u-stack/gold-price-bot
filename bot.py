@@ -60,62 +60,61 @@ def get_cached(key, expiry):
 # ================= GOLD =================
 def get_gold_price():
 
-    # 1️⃣ INDIA GOLD RATE (PRIMARY)
+    # 1️⃣ PRIMARY → KeralaGoldRates
+    try:
+        url = "https://keralagoldrates.com/today-22k-gold-rate-kerala/"
+        r = requests.get(url, headers={"User-Agent": "Mozilla"}, timeout=5)
+        soup = BeautifulSoup(r.text, "html.parser")
+
+        text = soup.get_text()
+
+        matches = re.findall(r"\₹\d{1,2},\d{3}", text)
+
+        for m in matches:
+            val = float(m.replace("₹", "").replace(",", ""))
+
+            if 13000 < val < 16000:
+                set_cached("gold", val)
+                return val, "LIVE"
+
+    except Exception as e:
+        print("KeralaGoldRates fail:", e)
+
+    # 2️⃣ FALLBACK → IndiaGoldRate
     try:
         url = "https://www.indiagoldrate.co.in/22k-gold-rate.php"
         r = requests.get(url, headers={"User-Agent": "Mozilla"}, timeout=5)
         soup = BeautifulSoup(r.text, "html.parser")
 
-        tables = soup.find_all("table")
+        rows = soup.find_all("tr")
 
-        for table in tables:
-            text = table.get_text()
+        for row in rows:
+            cols = row.find_all("td")
 
-            if "22K" in text or "22 Carat" in text:
-                matches = re.findall(r"\d{4,5}", text)
+            if len(cols) >= 2:
+                label = cols[0].get_text().lower()
+                value = cols[1].get_text().replace(",", "").strip()
 
-                for m in matches:
-                    val = float(m)
+                if "22" in label and value.isdigit():
+                    val = float(value)
+
                     if 5000 < val < 8000:
                         set_cached("gold", val)
                         return val, "LIVE"
 
     except Exception as e:
-        print("IndiaGoldRate fail:", e)
-
-    # 2️⃣ KERALA GOLD (FALLBACK)
-    try:
-        url = "https://www.keralagold.com/kerala-gold-rate-per-gram.htm"
-        r = requests.get(url, headers={"User-Agent": "Mozilla"}, timeout=5)
-        soup = BeautifulSoup(r.text, "html.parser")
-
-        tables = soup.find_all("table")
-
-        for table in tables:
-            text = table.get_text()
-
-            if "22K" in text:
-                matches = re.findall(r"\d{5}", text)
-
-                for m in matches:
-                    val = float(m)
-                    if 13000 < val < 16000:
-                        set_cached("gold", val)
-                        return val, "LIVE"
-
-    except Exception as e:
-        print("Kerala fail:", e)
+        print("India fallback fail:", e)
 
     cached = get_cached("gold", 1800)
     if cached:
         return cached, "CACHE"
 
-    return 6000, "DEFAULT"
+    return 14000, "DEFAULT"
 
 # ================= GOLDBEES =================
 def get_goldbees_price():
 
-    # 1️⃣ GOOGLE FINANCE
+    # 1️⃣ Google Finance
     try:
         url = "https://www.google.com/finance/quote/GOLDBEES:NSE"
         r = requests.get(url, headers={"User-Agent": "Mozilla"}, timeout=5)
@@ -131,7 +130,7 @@ def get_goldbees_price():
     except Exception as e:
         print("Google fail:", e)
 
-    # 2️⃣ MONEYCONTROL
+    # 2️⃣ MoneyControl fallback
     try:
         url = "https://www.moneycontrol.com/india/stockpricequote/gold-etf/nipponindiaetfgoldbees/GBE"
         r = requests.get(url, headers={"User-Agent": "Mozilla"}, timeout=5)
