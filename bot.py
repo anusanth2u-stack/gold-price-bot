@@ -33,7 +33,7 @@ LOCK_FILE = "bot.lock"
 # ================= LOCK =================
 def create_lock():
     if os.path.exists(LOCK_FILE):
-        print("Another instance already running. Exiting.")
+        print("Another instance running. Exit.")
         exit()
 
     with open(LOCK_FILE, "w") as f:
@@ -48,7 +48,7 @@ def remove_lock():
 atexit.register(remove_lock)
 
 
-# ================= HEALTH CHECK =================
+# ================= HEALTH =================
 class HealthHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -59,7 +59,6 @@ class HealthHandler(BaseHTTPRequestHandler):
 def start_health_server():
     port = int(os.environ.get("PORT", 10000))
     server = HTTPServer(("0.0.0.0", port), HealthHandler)
-    print(f"Health server running on {port}")
     server.serve_forever()
 
 
@@ -94,30 +93,17 @@ def get_gold_price():
         res = requests.get(url, headers={"User-Agent": "Mozilla"}, timeout=10)
         soup = BeautifulSoup(res.text, "html.parser")
 
-        for row in soup.find_all("tr"):
-            cols = row.find_all("td")
-            if len(cols) == 2:
-                match = re.search(r"\d{1,3}(?:,\d{3})*", cols[1].text)
-                if match:
-                    price = float(match.group().replace(",", ""))
-                    set_cached("gold", price)
-                    return price
-    except:
-        pass
+        text = soup.get_text()
+        matches = re.findall(r"\d{4,5}", text)
 
-    try:
-        url = "https://timesofindia.indiatimes.com/business/gold-rates-today/gold-price-in-bangalore.cms"
-        res = requests.get(url, timeout=10)
-        text = BeautifulSoup(res.text, "html.parser").get_text()
-
-        matches = re.findall(r"₹?\s?\d{2,3},\d{3}", text)
         for m in matches:
-            val = float(m.replace("₹", "").replace(",", ""))
+            val = float(m)
             if 12000 < val < 20000:
                 set_cached("gold", val)
                 return val
-    except:
-        pass
+
+    except Exception as e:
+        print("Gold error:", e)
 
     return get_cached("gold") or 14000
 
@@ -127,25 +113,15 @@ def get_goldbees_price():
         url = "https://query1.finance.yahoo.com/v7/finance/quote?symbols=GOLDBEES.NS"
         res = requests.get(url, timeout=10)
         data = res.json()
+
         price = data["quoteResponse"]["result"][0]["regularMarketPrice"]
 
-        if price:
+        if price and 30 < price < 100:
             set_cached("bees", price)
             return price
-    except:
-        pass
 
-    try:
-        url = "https://www.nseindia.com/get-quotes/equity?symbol=GOLDBEES"
-        res = requests.get(url, headers={"User-Agent": "Mozilla"}, timeout=10)
-
-        match = re.search(r"\d+\.\d+", res.text)
-        if match:
-            price = float(match.group())
-            set_cached("bees", price)
-            return price
-    except:
-        pass
+    except Exception as e:
+        print("Yahoo error:", e)
 
     return get_cached("bees") or 60
 
