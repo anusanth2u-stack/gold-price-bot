@@ -88,8 +88,7 @@ def get_cached(key, expiry):
 
 # ================= PRICE ENGINE =================
 
-# 🟡 GOLD
-def get_gold_price(force=False):
+def get_gold_price():
     try:
         url = "https://www.keralagold.com/kerala-gold-rate-per-gram.htm"
         res = requests.get(url, headers={"User-Agent": "Mozilla"}, timeout=10)
@@ -101,21 +100,19 @@ def get_gold_price(force=False):
             val = float(m)
             if 12000 < val < 20000:
                 set_cached("gold", val)
-                return val
+                return val, "LIVE"
 
     except Exception as e:
         print("Gold error:", e)
 
-    if not force:
-        cached = get_cached("gold", 1800)  # 30 min
-        if cached:
-            return cached
+    cached = get_cached("gold", 1800)
+    if cached:
+        return cached, "CACHE"
 
-    return 14000
+    return 14000, "DEFAULT"
 
 
-# 🔴 GOLDBEES (REAL-TIME)
-def get_goldbees_price(force=False):
+def get_goldbees_price():
     try:
         url = "https://query1.finance.yahoo.com/v7/finance/quote?symbols=GOLDBEES.NS"
         res = requests.get(url, timeout=5)
@@ -125,17 +122,38 @@ def get_goldbees_price(force=False):
 
         if price and 10 < price < 500:
             set_cached("bees", price)
-            return price
+            return price, "LIVE"
 
     except Exception as e:
         print("Yahoo error:", e)
 
-    if not force:
-        cached = get_cached("bees", 600)  # 10 min
-        if cached:
-            return cached
+    cached = get_cached("bees", 600)
+    if cached:
+        return cached, "CACHE"
 
-    return 120
+    return 120, "DEFAULT"
+
+
+# ================= ALERT =================
+def check_price_alert(name, new_price, key):
+    old_data = load_cache().get(key)
+
+    if not old_data:
+        return None
+
+    old_price = old_data["value"]
+
+    change = ((new_price - old_price) / old_price) * 100
+
+    if abs(change) >= 1:
+        return f"""
+🚨 {name} ALERT
+
+Old: ₹{round(old_price,2)}
+New: ₹{round(new_price,2)}
+Change: {round(change,2)}%
+"""
+    return None
 
 
 # ================= WINDOW =================
@@ -151,10 +169,20 @@ def extract_score(extra):
 
 
 # ================= DASHBOARD =================
-async def send_dashboard(context, force=False):
+async def send_dashboard(context: ContextTypes.DEFAULT_TYPE):
 
-    gold_price = get_gold_price(force)
-    goldbees_price = get_goldbees_price(force)
+    gold_price, gold_src = get_gold_price()
+    goldbees_price, bees_src = get_goldbees_price()
+
+    # ALERTS
+    alert1 = check_price_alert("GOLD", gold_price, "gold")
+    alert2 = check_price_alert("GOLDBEES", goldbees_price, "bees")
+
+    if alert1:
+        await context.bot.send_message(chat_id=USER_ID, text=alert1)
+
+    if alert2:
+        await context.bot.send_message(chat_id=USER_ID, text=alert2)
 
     gold_history = sheets.get_gold_history()
     bees_history = sheets.get_bees_history()
@@ -191,8 +219,8 @@ async def send_dashboard(context, force=False):
     msg = f"""
 💎 GOLD AI PORTFOLIO ENGINE
 
-💰 Gold: ₹{gold_price}
-📈 GoldBees: ₹{goldbees_price}
+💰 Gold: ₹{gold_price} ({gold_src})
+📈 GoldBees: ₹{goldbees_price} ({bees_src})
 
 📊 Trend (Gold): {gold_trend}
 📊 Trend (GoldBees): {bees_trend}
@@ -207,9 +235,6 @@ Value: ₹{int(lt_val)}
 
 P/L: ₹{int(lt_profit)} ({round(lt_pct,2)}%)
 
-Action: {lt_action}
-Reason: {lt_reason}
-
 ━━━━━━━━━━━━━━━
 🔴 SHORT TERM
 
@@ -219,60 +244,25 @@ Units: {round(st_units,2)}
 Value: ₹{int(st_val)}
 P/L: ₹{int(st_profit)}
 Return: {round(st_pct,2)}%
-
-━━━━━━━━━━━━━━━
-💎 TOTAL
-
-Value: ₹{int(total_val)}
-P/L: ₹{int(total_profit)}
-
-━━━━━━━━━━━━━━━
-🤖 AI DECISION
-
-Short-Term: {st_action} ₹{st_amt}
-Reason: {st_reason}
-
-Long-Term: {lt_action}
-Reason: {lt_reason}
-
-━━━━━━━━━━━━━━━
-🤖 ML INSIGHTS
-
-Range: ₹{ml_low} - ₹{ml_high}
-Signal: {ml_signal}
-Win Rate: {win_rate}%
-{extra}
 """
 
     await context.bot.send_message(chat_id=USER_ID, text=msg)
 
 
-# ================= COMMANDS =================
+# ================= COMMAND =================
 async def start(update, context):
     await send_dashboard(context)
-
-
-async def force(update, context):
-    await update.message.reply_text("⚡ Force refresh")
-    await send_dashboard(context, force=True)
 
 
 # ================= MAIN =================
 def main():
     create_lock()
+
     threading.Thread(target=start_health_server, daemon=True).start()
 
     app = ApplicationBuilder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("force", force))
-
-    times = [time(10,0,tzinfo=IST), time(12,0,tzinfo=IST), time(14,0,tzinfo=IST),
-             time(16,0,tzinfo=IST), time(18,0,tzinfo=IST)]
-
-    if app.job_queue:
-        for t in times:
-            app.job_queue.run_daily(lambda c: send_dashboard(c), time=t)
 
     print("Bot running 🚀")
     app.run_polling(drop_pending_updates=True)
