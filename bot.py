@@ -1,13 +1,10 @@
 import os
 import requests
-from bs4 import BeautifulSoup
-import re
 from datetime import datetime, time
 import pytz
 import json
 import threading
 import atexit
-from http.server import BaseHTTPRequestHandler, HTTPServer
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
@@ -37,20 +34,8 @@ def remove_lock():
     if os.path.exists(LOCK_FILE):
         os.remove(LOCK_FILE)
 
+
 atexit.register(remove_lock)
-
-
-# ================= HEALTH =================
-class HealthHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(b"OK")
-
-
-def start_health_server():
-    port = int(os.environ.get("PORT", 10000))
-    HTTPServer(("0.0.0.0", port), HealthHandler).serve_forever()
 
 
 # ================= CACHE =================
@@ -83,61 +68,49 @@ def get_cached(key, expiry):
     return data["value"]
 
 
-# ================= PRICE ENGINE =================
+# ================= PRICE =================
 
+# GOLD (stable Kerala-style fallback)
 def get_gold_price():
     try:
-        url = "https://www.keralagold.com/kerala-gold-rate-per-gram.htm"
-        res = requests.get(url, headers={"User-Agent": "Mozilla"}, timeout=10)
-        text = BeautifulSoup(res.text, "html.parser").get_text()
+        url = "https://www.goodreturns.in/gold-rates/"
+        res = requests.get(url, timeout=5)
+        text = res.text
 
+        import re
         matches = re.findall(r"\d{4,5}", text)
 
         for m in matches:
             val = float(m)
-            if 12000 < val < 20000:
+            if 5000 < val < 8000:
                 set_cached("gold", val)
                 return val, "LIVE"
-    except:
-        pass
+
+    except Exception as e:
+        print("Gold error:", e)
 
     cached = get_cached("gold", 1800)
     if cached:
         return cached, "CACHE"
 
-    return 14000, "DEFAULT"
+    return 6000, "DEFAULT"
 
 
+# GOLDBEES (FIXED YAHOO)
 def get_goldbees_price():
-    # 1️⃣ Yahoo
     try:
-        url = "https://query1.finance.yahoo.com/v7/finance/quote?symbols=GOLDBEES.NS"
+        url = "https://query1.finance.yahoo.com/v8/finance/chart/GOLDBEES.NS"
         res = requests.get(url, timeout=5)
         data = res.json()
 
-        price = data["quoteResponse"]["result"][0]["regularMarketPrice"]
+        price = data["chart"]["result"][0]["meta"]["regularMarketPrice"]
 
-        if price and 10 < price < 500:
+        if price and 50 < price < 500:
             set_cached("bees", price)
             return price, "LIVE"
-    except:
-        pass
 
-    # 2️⃣ Google fallback
-    try:
-        url = "https://www.google.com/search?q=goldbees+share+price"
-        res = requests.get(url, headers={"User-Agent": "Mozilla"}, timeout=5)
-        text = BeautifulSoup(res.text, "html.parser").get_text()
-
-        matches = re.findall(r"\d+\.\d+", text)
-
-        for m in matches:
-            val = float(m)
-            if 50 < val < 500:
-                set_cached("bees", val)
-                return val, "LIVE"
-    except:
-        pass
+    except Exception as e:
+        print("Yahoo error:", e)
 
     cached = get_cached("bees", 600)
     if cached:
@@ -182,11 +155,11 @@ def extract_score(extra):
 async def send_dashboard(context: ContextTypes.DEFAULT_TYPE):
 
     gold_price, gold_src = get_gold_price()
-    goldbees_price, bees_src = get_goldbees_price()
+    bees_price, bees_src = get_goldbees_price()
 
     # ALERTS
     alert1 = check_price_alert("GOLD", gold_price, "gold")
-    alert2 = check_price_alert("GOLDBEES", goldbees_price, "bees")
+    alert2 = check_price_alert("GOLDBEES", bees_price, "bees")
 
     if alert1:
         await context.bot.send_message(chat_id=USER_ID, text=alert1)
@@ -198,9 +171,9 @@ async def send_dashboard(context: ContextTypes.DEFAULT_TYPE):
     bees_history = sheets.get_bees_history()
 
     gold_trend, _ = logic.get_trend(gold_price, gold_history)
-    bees_trend, reason = logic.get_trend(goldbees_price, bees_history)
+    bees_trend, reason = logic.get_trend(bees_price, bees_history)
 
-    st_inv, st_cash, st_units, st_val, st_profit, st_pct = sheets.get_st_metrics(goldbees_price)
+    st_inv, st_cash, st_units, st_val, st_profit, st_pct = sheets.get_st_metrics(bees_price)
     lt_inv, lt_gold, lt_val, lt_profit, lt_pct = sheets.get_lt_metrics(gold_price)
 
     avg_price = sheets.get_avg_buy_price()
@@ -211,17 +184,15 @@ async def send_dashboard(context: ContextTypes.DEFAULT_TYPE):
 
     score = extract_score(extra)
 
-    lt_trend_ml, lt_valn, lt_zone, lt_conf = ml.long_term_ml(gold_history, avg_price, gold_price)
-
     st_action, st_amt, st_reason, sl, tgt = logic.short_term_ai(
-        st_cash, st_pct, bees_trend, score, win_rate, goldbees_price
+        st_cash, st_pct, bees_trend, score, win_rate, bees_price
     )
 
     lt_action, lt_amt, lt_reason = logic.long_term_ai(
         bought, gold_price, avg_price, gold_trend, gold_history
     )
 
-    sheets.log_data(gold_price, gold_trend, score, goldbees_price, bees_trend, score)
+    sheets.log_data(gold_price, gold_trend, score, bees_price, bees_trend, score)
 
     total_val = st_val + lt_val
     total_profit = total_val - (st_inv + lt_inv)
@@ -230,7 +201,7 @@ async def send_dashboard(context: ContextTypes.DEFAULT_TYPE):
 💎 GOLD AI PORTFOLIO ENGINE
 
 💰 Gold: ₹{gold_price} ({gold_src})
-📈 GoldBees: ₹{goldbees_price} ({bees_src})
+📈 GoldBees: ₹{bees_price} ({bees_src})
 
 📊 Trend (Gold): {gold_trend}
 📊 Trend (GoldBees): {bees_trend}
@@ -280,7 +251,7 @@ async def button(update, context):
         return
 
     gold_price, _ = get_gold_price()
-    goldbees_price, _ = get_goldbees_price()
+    bees_price, _ = get_goldbees_price()
 
     try:
         if q.data == "lt_buy":
@@ -289,12 +260,12 @@ async def button(update, context):
 
         elif "buy_" in q.data:
             amt = int(q.data.split("_")[1])
-            sheets.add_short("BUY", amt, goldbees_price)
+            sheets.add_short("BUY", amt, bees_price)
             await q.message.reply_text(f"BUY ₹{amt}")
 
         elif "sell_" in q.data:
             amt = int(q.data.split("_")[1])
-            sheets.add_short("SELL", amt, goldbees_price)
+            sheets.add_short("SELL", amt, bees_price)
             await q.message.reply_text(f"SELL ₹{amt}")
 
     except Exception as e:
@@ -319,8 +290,6 @@ async def job(context):
 # ================= MAIN =================
 def main():
     create_lock()
-
-    threading.Thread(target=start_health_server, daemon=True).start()
 
     app = ApplicationBuilder().token(TOKEN).build()
 
