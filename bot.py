@@ -37,7 +37,6 @@ def remove_lock():
     if os.path.exists(LOCK_FILE):
         os.remove(LOCK_FILE)
 
-
 atexit.register(remove_lock)
 
 
@@ -79,10 +78,8 @@ def get_cached(key, expiry):
     data = load_cache().get(key)
     if not data:
         return None
-
     if datetime.now().timestamp() - data["time"] > expiry:
         return None
-
     return data["value"]
 
 
@@ -101,9 +98,8 @@ def get_gold_price():
             if 12000 < val < 20000:
                 set_cached("gold", val)
                 return val, "LIVE"
-
-    except Exception as e:
-        print("Gold error:", e)
+    except:
+        pass
 
     cached = get_cached("gold", 1800)
     if cached:
@@ -113,6 +109,7 @@ def get_gold_price():
 
 
 def get_goldbees_price():
+    # 1️⃣ Yahoo
     try:
         url = "https://query1.finance.yahoo.com/v7/finance/quote?symbols=GOLDBEES.NS"
         res = requests.get(url, timeout=5)
@@ -123,9 +120,24 @@ def get_goldbees_price():
         if price and 10 < price < 500:
             set_cached("bees", price)
             return price, "LIVE"
+    except:
+        pass
 
-    except Exception as e:
-        print("Yahoo error:", e)
+    # 2️⃣ Google fallback
+    try:
+        url = "https://www.google.com/search?q=goldbees+share+price"
+        res = requests.get(url, headers={"User-Agent": "Mozilla"}, timeout=5)
+        text = BeautifulSoup(res.text, "html.parser").get_text()
+
+        matches = re.findall(r"\d+\.\d+", text)
+
+        for m in matches:
+            val = float(m)
+            if 50 < val < 500:
+                set_cached("bees", val)
+                return val, "LIVE"
+    except:
+        pass
 
     cached = get_cached("bees", 600)
     if cached:
@@ -137,12 +149,10 @@ def get_goldbees_price():
 # ================= ALERT =================
 def check_price_alert(name, new_price, key):
     old_data = load_cache().get(key)
-
     if not old_data:
         return None
 
     old_price = old_data["value"]
-
     change = ((new_price - old_price) / old_price) * 100
 
     if abs(change) >= 1:
@@ -246,11 +256,63 @@ P/L: ₹{int(st_profit)}
 Return: {round(st_pct,2)}%
 """
 
-    await context.bot.send_message(chat_id=USER_ID, text=msg)
+    keyboard = []
+
+    if lt_action == "BUY":
+        keyboard.append([InlineKeyboardButton("🟢 LT BUY ₹15000", callback_data="lt_buy")])
+
+    if st_action == "BUY":
+        keyboard.append([InlineKeyboardButton(f"🟢 BUY ₹{st_amt}", callback_data=f"buy_{st_amt}")])
+
+    if st_action == "SELL":
+        keyboard.append([InlineKeyboardButton(f"🔴 SELL ₹{st_amt}", callback_data=f"sell_{st_amt}")])
+
+    await context.bot.send_message(chat_id=USER_ID, text=msg, reply_markup=InlineKeyboardMarkup(keyboard))
 
 
-# ================= COMMAND =================
+# ================= BUTTON =================
+async def button(update, context):
+    q = update.callback_query
+    await q.answer()
+
+    if not is_window_open():
+        await q.message.reply_text("Window closed")
+        return
+
+    gold_price, _ = get_gold_price()
+    goldbees_price, _ = get_goldbees_price()
+
+    try:
+        if q.data == "lt_buy":
+            sheets.add_long(gold_price)
+            await q.message.reply_text("LT BUY DONE")
+
+        elif "buy_" in q.data:
+            amt = int(q.data.split("_")[1])
+            sheets.add_short("BUY", amt, goldbees_price)
+            await q.message.reply_text(f"BUY ₹{amt}")
+
+        elif "sell_" in q.data:
+            amt = int(q.data.split("_")[1])
+            sheets.add_short("SELL", amt, goldbees_price)
+            await q.message.reply_text(f"SELL ₹{amt}")
+
+    except Exception as e:
+        await q.message.reply_text(str(e))
+
+
+# ================= COMMANDS =================
 async def start(update, context):
+    await send_dashboard(context)
+
+
+async def force(update, context):
+    await update.message.reply_text("⚡ Force update")
+    await send_dashboard(context)
+
+
+# ================= SCHEDULER =================
+async def job(context):
     await send_dashboard(context)
 
 
@@ -262,7 +324,26 @@ def main():
 
     app = ApplicationBuilder().token(TOKEN).build()
 
+    async def post_init(app):
+        await app.bot.delete_webhook(drop_pending_updates=True)
+
+    app.post_init = post_init
+
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("force", force))
+    app.add_handler(CallbackQueryHandler(button))
+
+    times = [
+        time(10,0,tzinfo=IST),
+        time(12,0,tzinfo=IST),
+        time(14,0,tzinfo=IST),
+        time(16,0,tzinfo=IST),
+        time(18,0,tzinfo=IST),
+    ]
+
+    if app.job_queue:
+        for t in times:
+            app.job_queue.run_daily(job, time=t)
 
     print("Bot running 🚀")
     app.run_polling(drop_pending_updates=True)
