@@ -10,12 +10,7 @@ import atexit
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import (
-    ApplicationBuilder,
-    CommandHandler,
-    CallbackQueryHandler,
-    ContextTypes,
-)
+from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
 
 import logic
 import sheets
@@ -35,9 +30,7 @@ def create_lock():
     if os.path.exists(LOCK_FILE):
         print("Another instance running. Exit.")
         exit()
-
-    with open(LOCK_FILE, "w") as f:
-        f.write("running")
+    open(LOCK_FILE, "w").write("running")
 
 
 def remove_lock():
@@ -58,42 +51,50 @@ class HealthHandler(BaseHTTPRequestHandler):
 
 def start_health_server():
     port = int(os.environ.get("PORT", 10000))
-    server = HTTPServer(("0.0.0.0", port), HealthHandler)
-    server.serve_forever()
+    HTTPServer(("0.0.0.0", port), HealthHandler).serve_forever()
 
 
 # ================= CACHE =================
 def load_cache():
     try:
-        with open(CACHE_FILE, "r") as f:
-            return json.load(f)
+        return json.load(open(CACHE_FILE))
     except:
         return {}
 
 
 def save_cache(data):
-    with open(CACHE_FILE, "w") as f:
-        json.dump(data, f)
-
-
-def get_cached(key):
-    return load_cache().get(key)
+    json.dump(data, open(CACHE_FILE, "w"))
 
 
 def set_cached(key, value):
     data = load_cache()
-    data[key] = value
+    data[key] = {
+        "value": value,
+        "time": datetime.now().timestamp()
+    }
     save_cache(data)
 
 
+def get_cached(key, expiry):
+    data = load_cache().get(key)
+    if not data:
+        return None
+
+    if datetime.now().timestamp() - data["time"] > expiry:
+        return None
+
+    return data["value"]
+
+
 # ================= PRICE ENGINE =================
-def get_gold_price():
+
+# 🟡 GOLD
+def get_gold_price(force=False):
     try:
         url = "https://www.keralagold.com/kerala-gold-rate-per-gram.htm"
         res = requests.get(url, headers={"User-Agent": "Mozilla"}, timeout=10)
-        soup = BeautifulSoup(res.text, "html.parser")
+        text = BeautifulSoup(res.text, "html.parser").get_text()
 
-        text = soup.get_text()
         matches = re.findall(r"\d{4,5}", text)
 
         for m in matches:
@@ -105,18 +106,23 @@ def get_gold_price():
     except Exception as e:
         print("Gold error:", e)
 
-    return get_cached("gold") or 14000
+    if not force:
+        cached = get_cached("gold", 1800)  # 30 min
+        if cached:
+            return cached
+
+    return 14000
 
 
-def get_goldbees_price():
+# 🔴 GOLDBEES (REAL-TIME)
+def get_goldbees_price(force=False):
     try:
         url = "https://query1.finance.yahoo.com/v7/finance/quote?symbols=GOLDBEES.NS"
-        res = requests.get(url, timeout=10)
+        res = requests.get(url, timeout=5)
         data = res.json()
 
         price = data["quoteResponse"]["result"][0]["regularMarketPrice"]
 
-        # ✅ UPDATED RANGE (FIXED)
         if price and 10 < price < 500:
             set_cached("bees", price)
             return price
@@ -124,7 +130,12 @@ def get_goldbees_price():
     except Exception as e:
         print("Yahoo error:", e)
 
-    return get_cached("bees") or 120
+    if not force:
+        cached = get_cached("bees", 600)  # 10 min
+        if cached:
+            return cached
+
+    return 120
 
 
 # ================= WINDOW =================
@@ -140,10 +151,10 @@ def extract_score(extra):
 
 
 # ================= DASHBOARD =================
-async def send_dashboard(context: ContextTypes.DEFAULT_TYPE):
+async def send_dashboard(context, force=False):
 
-    gold_price = get_gold_price()
-    goldbees_price = get_goldbees_price()
+    gold_price = get_gold_price(force)
+    goldbees_price = get_goldbees_price(force)
 
     gold_history = sheets.get_gold_history()
     bees_history = sheets.get_bees_history()
@@ -162,9 +173,7 @@ async def send_dashboard(context: ContextTypes.DEFAULT_TYPE):
 
     score = extract_score(extra)
 
-    lt_trend_ml, lt_valn, lt_zone, lt_conf = ml.long_term_ml(
-        gold_history, avg_price, gold_price
-    )
+    lt_trend_ml, lt_valn, lt_zone, lt_conf = ml.long_term_ml(gold_history, avg_price, gold_price)
 
     st_action, st_amt, st_reason, sl, tgt = logic.short_term_ai(
         st_cash, st_pct, bees_trend, score, win_rate, goldbees_price
@@ -174,14 +183,7 @@ async def send_dashboard(context: ContextTypes.DEFAULT_TYPE):
         bought, gold_price, avg_price, gold_trend, gold_history
     )
 
-    sheets.log_data(
-        gold_price,
-        gold_trend,
-        score,
-        goldbees_price,
-        bees_trend,
-        score
-    )
+    sheets.log_data(gold_price, gold_trend, score, goldbees_price, bees_trend, score)
 
     total_val = st_val + lt_val
     total_profit = total_val - (st_inv + lt_inv)
@@ -229,75 +231,20 @@ P/L: ₹{int(total_profit)}
 
 Short-Term: {st_action} ₹{st_amt}
 Reason: {st_reason}
-"""
 
-    if sl:
-        msg += f"\nStop Loss: ₹{sl}\nTarget: ₹{tgt}\n"
-
-    msg += f"""
 Long-Term: {lt_action}
 Reason: {lt_reason}
 
 ━━━━━━━━━━━━━━━
-🤖 ML INSIGHTS (SHORT TERM)
+🤖 ML INSIGHTS
 
 Range: ₹{ml_low} - ₹{ml_high}
 Signal: {ml_signal}
 Win Rate: {win_rate}%
 {extra}
-
-━━━━━━━━━━━━━━━
-🤖 ML INSIGHTS (LONG TERM)
-
-Trend Strength: {lt_trend_ml}
-Valuation: {lt_valn}
-Accumulation Zone: ₹{lt_zone}
-Confidence: {lt_conf}
 """
 
-    keyboard = []
-
-    if lt_action == "BUY":
-        keyboard.append([InlineKeyboardButton("🟢 LT BUY ₹15000", callback_data="lt_buy")])
-
-    if st_action == "BUY":
-        keyboard.append([InlineKeyboardButton(f"🟢 BUY ₹{st_amt}", callback_data=f"buy_{st_amt}")])
-
-    if st_action == "SELL":
-        keyboard.append([InlineKeyboardButton(f"🔴 SELL ₹{st_amt}", callback_data=f"sell_{st_amt}")])
-
-    await context.bot.send_message(chat_id=USER_ID, text=msg, reply_markup=InlineKeyboardMarkup(keyboard))
-
-
-# ================= BUTTON =================
-async def button(update, context):
-    q = update.callback_query
-    await q.answer()
-
-    if not is_window_open():
-        await q.message.reply_text("Window closed")
-        return
-
-    gold_price = get_gold_price()
-    goldbees_price = get_goldbees_price()
-
-    try:
-        if q.data == "lt_buy":
-            sheets.add_long(gold_price)
-            await q.message.reply_text("LT BUY DONE")
-
-        elif "buy_" in q.data:
-            amt = int(q.data.split("_")[1])
-            sheets.add_short("BUY", amt, goldbees_price)
-            await q.message.reply_text(f"BUY ₹{amt}")
-
-        elif "sell_" in q.data:
-            amt = int(q.data.split("_")[1])
-            sheets.add_short("SELL", amt, goldbees_price)
-            await q.message.reply_text(f"SELL ₹{amt}")
-
-    except Exception as e:
-        await q.message.reply_text(str(e))
+    await context.bot.send_message(chat_id=USER_ID, text=msg)
 
 
 # ================= COMMANDS =================
@@ -306,44 +253,26 @@ async def start(update, context):
 
 
 async def force(update, context):
-    await update.message.reply_text("⚡ Force update")
-    await send_dashboard(context)
-
-
-# ================= SCHEDULER =================
-async def job(context):
-    print("Scheduled Trigger")
-    await send_dashboard(context)
+    await update.message.reply_text("⚡ Force refresh")
+    await send_dashboard(context, force=True)
 
 
 # ================= MAIN =================
 def main():
     create_lock()
-
     threading.Thread(target=start_health_server, daemon=True).start()
 
     app = ApplicationBuilder().token(TOKEN).build()
 
-    async def post_init(app):
-        await app.bot.delete_webhook(drop_pending_updates=True)
-
-    app.post_init = post_init
-
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("force", force))
-    app.add_handler(CallbackQueryHandler(button))
 
-    times = [
-        time(10, 0, tzinfo=IST),
-        time(12, 0, tzinfo=IST),
-        time(14, 0, tzinfo=IST),
-        time(16, 0, tzinfo=IST),
-        time(18, 0, tzinfo=IST),
-    ]
+    times = [time(10,0,tzinfo=IST), time(12,0,tzinfo=IST), time(14,0,tzinfo=IST),
+             time(16,0,tzinfo=IST), time(18,0,tzinfo=IST)]
 
     if app.job_queue:
         for t in times:
-            app.job_queue.run_daily(job, time=t)
+            app.job_queue.run_daily(lambda c: send_dashboard(c), time=t)
 
     print("Bot running 🚀")
     app.run_polling(drop_pending_updates=True)
