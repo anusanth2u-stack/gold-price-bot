@@ -5,8 +5,8 @@ import re
 from datetime import datetime, time
 import pytz
 import json
-import atexit
 import threading
+import atexit
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
@@ -30,10 +30,10 @@ CACHE_FILE = "price_cache.json"
 LOCK_FILE = "bot.lock"
 
 
-# ================= LOCK (PREVENT DUPLICATE) =================
+# ================= LOCK =================
 def create_lock():
     if os.path.exists(LOCK_FILE):
-        print("⚠️ Another bot instance already running. Exiting.")
+        print("Another instance already running. Exiting.")
         exit()
 
     with open(LOCK_FILE, "w") as f:
@@ -52,7 +52,6 @@ atexit.register(remove_lock)
 class HealthHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
-        self.send_header("Content-type", "text/plain")
         self.end_headers()
         self.wfile.write(b"OK")
 
@@ -60,7 +59,7 @@ class HealthHandler(BaseHTTPRequestHandler):
 def start_health_server():
     port = int(os.environ.get("PORT", 10000))
     server = HTTPServer(("0.0.0.0", port), HealthHandler)
-    print(f"Health server running on port {port}")
+    print(f"Health server running on {port}")
     server.serve_forever()
 
 
@@ -344,35 +343,33 @@ async def job(context):
 def main():
     create_lock()
 
-    threading.Thread(target=start_health_server).start()
+    threading.Thread(target=start_health_server, daemon=True).start()
 
-    while True:
-        try:
-            app = ApplicationBuilder().token(TOKEN).build()
+    app = ApplicationBuilder().token(TOKEN).build()
 
-            app.post_init = lambda app: app.bot.delete_webhook(drop_pending_updates=True)
+    async def post_init(app):
+        await app.bot.delete_webhook(drop_pending_updates=True)
 
-            app.add_handler(CommandHandler("start", start))
-            app.add_handler(CommandHandler("force", force))
-            app.add_handler(CallbackQueryHandler(button))
+    app.post_init = post_init
 
-            times = [
-                time(10, 0, tzinfo=IST),
-                time(12, 0, tzinfo=IST),
-                time(14, 0, tzinfo=IST),
-                time(16, 0, tzinfo=IST),
-                time(18, 0, tzinfo=IST),
-            ]
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("force", force))
+    app.add_handler(CallbackQueryHandler(button))
 
-            if app.job_queue:
-                for t in times:
-                    app.job_queue.run_daily(job, time=t)
+    times = [
+        time(10, 0, tzinfo=IST),
+        time(12, 0, tzinfo=IST),
+        time(14, 0, tzinfo=IST),
+        time(16, 0, tzinfo=IST),
+        time(18, 0, tzinfo=IST),
+    ]
 
-            print("Bot running 🚀")
-            app.run_polling(drop_pending_updates=True)
+    if app.job_queue:
+        for t in times:
+            app.job_queue.run_daily(job, time=t)
 
-        except Exception as e:
-            print("Bot crashed, restarting...", e)
+    print("Bot running 🚀")
+    app.run_polling(drop_pending_updates=True)
 
 
 if __name__ == "__main__":
