@@ -116,14 +116,15 @@ def get_goldbees_price():
 
         price = data["quoteResponse"]["result"][0]["regularMarketPrice"]
 
-        if price and 30 < price < 100:
+        # ✅ UPDATED RANGE (FIXED)
+        if price and 10 < price < 500:
             set_cached("bees", price)
             return price
 
     except Exception as e:
         print("Yahoo error:", e)
 
-    return get_cached("bees") or 60
+    return get_cached("bees") or 120
 
 
 # ================= WINDOW =================
