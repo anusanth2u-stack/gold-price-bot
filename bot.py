@@ -1,6 +1,7 @@
 import os
 import requests
 from bs4 import BeautifulSoup
+import re
 from datetime import datetime, time
 import pytz
 import json
@@ -58,45 +59,93 @@ def get_cached(key, expiry):
 
 # ================= GOLD =================
 def get_gold_price():
+
+    # 1️⃣ INDIA GOLD RATE (PRIMARY)
+    try:
+        url = "https://www.indiagoldrate.co.in/22k-gold-rate.php"
+        r = requests.get(url, headers={"User-Agent": "Mozilla"}, timeout=5)
+        soup = BeautifulSoup(r.text, "html.parser")
+
+        tables = soup.find_all("table")
+
+        for table in tables:
+            text = table.get_text()
+
+            if "22K" in text or "22 Carat" in text:
+                matches = re.findall(r"\d{4,5}", text)
+
+                for m in matches:
+                    val = float(m)
+                    if 5000 < val < 8000:
+                        set_cached("gold", val)
+                        return val, "LIVE"
+
+    except Exception as e:
+        print("IndiaGoldRate fail:", e)
+
+    # 2️⃣ KERALA GOLD (FALLBACK)
     try:
         url = "https://www.keralagold.com/kerala-gold-rate-per-gram.htm"
         r = requests.get(url, headers={"User-Agent": "Mozilla"}, timeout=5)
         soup = BeautifulSoup(r.text, "html.parser")
 
-        tds = soup.find_all("td")
+        tables = soup.find_all("table")
 
-        for td in tds:
-            txt = td.get_text().strip().replace(",", "")
-            if txt.isdigit():
-                val = float(txt)
-                if 13000 < val < 16000:
-                    set_cached("gold", val)
-                    return val, "LIVE"
+        for table in tables:
+            text = table.get_text()
+
+            if "22K" in text:
+                matches = re.findall(r"\d{5}", text)
+
+                for m in matches:
+                    val = float(m)
+                    if 13000 < val < 16000:
+                        set_cached("gold", val)
+                        return val, "LIVE"
 
     except Exception as e:
-        print("Gold error:", e)
+        print("Kerala fail:", e)
 
     cached = get_cached("gold", 1800)
     if cached:
         return cached, "CACHE"
 
-    return 14000, "DEFAULT"
+    return 6000, "DEFAULT"
 
 # ================= GOLDBEES =================
 def get_goldbees_price():
+
+    # 1️⃣ GOOGLE FINANCE
     try:
-        url = "https://query1.finance.yahoo.com/v8/finance/chart/GOLDBEES.NS"
-        r = requests.get(url, timeout=5)
-        data = r.json()
+        url = "https://www.google.com/finance/quote/GOLDBEES:NSE"
+        r = requests.get(url, headers={"User-Agent": "Mozilla"}, timeout=5)
+        soup = BeautifulSoup(r.text, "html.parser")
 
-        price = data["chart"]["result"][0]["meta"]["regularMarketPrice"]
-
-        if price and 80 < price < 200:
-            set_cached("bees", price)
-            return price, "LIVE"
+        tag = soup.find("div", {"class": "YMlKec fxKbKc"})
+        if tag:
+            val = float(tag.text.replace("₹", "").replace(",", ""))
+            if 80 < val < 200:
+                set_cached("bees", val)
+                return val, "LIVE"
 
     except Exception as e:
-        print("Yahoo error:", e)
+        print("Google fail:", e)
+
+    # 2️⃣ MONEYCONTROL
+    try:
+        url = "https://www.moneycontrol.com/india/stockpricequote/gold-etf/nipponindiaetfgoldbees/GBE"
+        r = requests.get(url, headers={"User-Agent": "Mozilla"}, timeout=5)
+        soup = BeautifulSoup(r.text, "html.parser")
+
+        tag = soup.find("span", {"class": "inprice1"})
+        if tag:
+            val = float(tag.text.strip())
+            if 80 < val < 200:
+                set_cached("bees", val)
+                return val, "LIVE"
+
+    except Exception as e:
+        print("MC fail:", e)
 
     cached = get_cached("bees", 600)
     if cached:
@@ -242,11 +291,7 @@ Win Rate: {win_rate}%
     if st_action == "SELL":
         keyboard.append([InlineKeyboardButton(f"🔴 SELL ₹{st_amt}", callback_data=f"sell_{st_amt}")])
 
-    await context.bot.send_message(
-        chat_id=USER_ID,
-        text=msg,
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
+    await context.bot.send_message(chat_id=USER_ID, text=msg, reply_markup=InlineKeyboardMarkup(keyboard))
 
 # ================= BUTTON =================
 async def button(update, context):
