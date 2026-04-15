@@ -511,6 +511,18 @@ async def dashboard_link(update, context):
 def main():
     create_lock()
 
+    # ── Kill any existing polling session first ──
+    import asyncio, telegram
+    async def clear_session():
+        bot = telegram.Bot(TOKEN)
+        await bot.delete_webhook(drop_pending_updates=True)
+        # Force-close old polling by getting updates with timeout=0
+        try:
+            await bot.get_updates(offset=-1, timeout=0)
+        except Exception:
+            pass
+    asyncio.run(clear_session())
+
     # ── FIX 1: Start Flask FIRST so Render sees an open port ──
     # Render health-checks for an open port immediately on start.
     # If Flask isn't up first, Render kills the service.
