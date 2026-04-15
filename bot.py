@@ -43,63 +43,27 @@ def get_data():
 def health():
     return jsonify({"status": "ok", "updated": latest_data.get("updated_at", "never")})
 
-# ── OTP store (in-memory, expires in 10 min) ─────────────────────────────
-import random, smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
-import time as _time
-
-_otp_store = {}
-SMTP_EMAIL    = os.environ.get("SMTP_EMAIL")
-SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD")
-OTP_TO_EMAIL  = "anusanth2u@gmail.com"
-
-def _send_otp_email(otp):
-    try:
-        msg = MIMEMultipart("alternative")
-        msg["Subject"] = "Gold AI — Your OTP"
-        msg["From"]    = SMTP_EMAIL
-        msg["To"]      = OTP_TO_EMAIL
-        html = f"""<div style="background:#0a0a08;padding:40px;font-family:Georgia,serif;color:#ddd8c8;border-radius:8px;max-width:400px;margin:auto">
-          <div style="color:#c8973a;font-size:11px;letter-spacing:3px;text-transform:uppercase;margin-bottom:12px">Gold AI Portfolio Engine</div>
-          <h2 style="color:#f0c060;font-size:28px;margin:0 0 8px">Your OTP</h2>
-          <p style="color:#666050;font-size:12px;margin-bottom:24px">Valid for 10 minutes</p>
-          <div style="background:#161612;border:1px solid rgba(200,151,58,0.3);border-radius:4px;padding:20px;text-align:center;letter-spacing:12px;font-size:32px;color:#f0c060;font-weight:bold">{otp}</div>
-          <p style="color:#444;font-size:11px;margin-top:20px">If you did not request this, ignore this email.</p>
-        </div>"""
-        msg.attach(MIMEText(html, "html"))
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
-            server.login(SMTP_EMAIL, SMTP_PASSWORD)
-            server.sendmail(SMTP_EMAIL, OTP_TO_EMAIL, msg.as_string())
-        return True
-    except Exception as e:
-        print("OTP email fail:", e)
-        return False
+# ── Simple PIN verification (no email needed) ────────────────────────────
+# Set OTP_PIN env var in Render to your chosen 6-digit PIN e.g. 482931
 
 @app_web.route("/send-otp", methods=["POST"])
 def send_otp():
-    otp = str(random.randint(100000, 999999))
-    _otp_store["otp"]     = otp
-    _otp_store["expires"] = _time.time() + 600
-    ok = _send_otp_email(otp)
-    if ok:
-        return jsonify({"ok": True,  "message": "OTP sent to registered email"})
-    return jsonify({"ok": False, "message": "Failed to send OTP"}), 500
+    # No email — just confirm PIN is configured and tell frontend to show PIN screen
+    pin = os.environ.get("OTP_PIN", "")
+    if not pin:
+        return jsonify({"ok": False, "message": "OTP_PIN not set in environment"}), 500
+    return jsonify({"ok": True, "message": "Enter your security PIN"})
 
 @app_web.route("/verify-otp", methods=["POST"])
 def verify_otp():
     from flask import request as freq
     body    = freq.get_json()
     entered = str(body.get("otp", "")).strip()
-    stored  = _otp_store.get("otp")
-    expires = _otp_store.get("expires", 0)
-    if not stored:
-        return jsonify({"ok": False, "message": "No OTP requested"}), 400
-    if _time.time() > expires:
-        return jsonify({"ok": False, "message": "OTP expired — request a new one"}), 400
-    if entered != stored:
-        return jsonify({"ok": False, "message": "Incorrect OTP"}), 400
-    _otp_store.clear()
+    pin     = os.environ.get("OTP_PIN", "")
+    if not pin:
+        return jsonify({"ok": False, "message": "OTP_PIN not configured on server"}), 500
+    if entered != pin:
+        return jsonify({"ok": False, "message": "Incorrect PIN"}), 400
     return jsonify({"ok": True, "message": "Verified"})
 
 @app_web.route("/sheet-data")
