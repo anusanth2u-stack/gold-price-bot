@@ -26,7 +26,6 @@ LOCK_FILE = "bot.lock"
 def create_lock():
     if os.path.exists(LOCK_FILE):
         exit()
-    # FIX 2: Use 'with' to properly close file handles
     with open(LOCK_FILE, "w") as f:
         f.write("running")
 
@@ -39,14 +38,12 @@ atexit.register(remove_lock)
 # ================= CACHE =================
 def load_cache():
     try:
-        # FIX 2: Use 'with' to properly close file handles
         with open(CACHE_FILE) as f:
             return json.load(f)
     except:
         return {}
 
 def save_cache(data):
-    # FIX 2: Use 'with' to properly close file handles
     with open(CACHE_FILE, "w") as f:
         json.dump(data, f)
 
@@ -73,13 +70,10 @@ def get_gold_price():
         soup = BeautifulSoup(r.text, "html.parser")
 
         text = soup.get_text()
-
-        # FIX 1: Remove invalid escape \₹ — ₹ does not need escaping in regex
         matches = re.findall(r"₹\d{1,2},\d{3}", text)
 
         for m in matches:
             val = float(m.replace("₹", "").replace(",", ""))
-
             if 13000 < val < 16000:
                 set_cached("gold", val)
                 return val, "LIVE"
@@ -94,17 +88,13 @@ def get_gold_price():
         soup = BeautifulSoup(r.text, "html.parser")
 
         rows = soup.find_all("tr")
-
         for row in rows:
             cols = row.find_all("td")
-
             if len(cols) >= 2:
                 label = cols[0].get_text().lower()
                 value = cols[1].get_text().replace(",", "").strip()
-
                 if "22" in label and value.isdigit():
                     val = float(value)
-
                     if 5000 < val < 8000:
                         set_cached("gold", val)
                         return val, "LIVE"
@@ -171,15 +161,15 @@ def check_price_alert(name, new_price, key):
         return f"""
 🚨 {name} ALERT
 
-Old: ₹{round(old['value'],2)}
-New: ₹{round(new_price,2)}
-Change: {round(change,2)}%
+Old: ₹{round(old['value'], 2)}
+New: ₹{round(new_price, 2)}
+Change: {round(change, 2)}%
 """
     return None
 
 # ================= WINDOW =================
 def is_window_open():
-    return datetime.now(IST).hour in [10,12,14,16,18]
+    return datetime.now(IST).hour in [10, 12, 14, 16, 18]
 
 def extract_score(extra):
     try:
@@ -228,11 +218,12 @@ async def send_dashboard(context: ContextTypes.DEFAULT_TYPE):
         bought, gold_price, avg_price, gold_trend, gold_history
     )
 
-    # FIX 3: Last argument was duplicate 'score'; changed to 'win_rate'
     sheets.log_data(gold_price, gold_trend, score, bees_price, bees_trend, win_rate)
 
     total_val = st_val + lt_val
     total_profit = total_val - (st_inv + lt_inv)
+
+    sl_line = f"SL: ₹{sl} | Target: ₹{tgt}" if sl else ""
 
     msg = f"""
 💎 GOLD AI PORTFOLIO ENGINE
@@ -248,20 +239,23 @@ async def send_dashboard(context: ContextTypes.DEFAULT_TYPE):
 🟢 LONG TERM
 
 Invested: ₹{int(lt_inv)}
-Gold: {round(lt_gold,3)}g
+Gold: {round(lt_gold, 3)}g
 Value: ₹{int(lt_val)}
+P/L: ₹{int(lt_profit)} ({round(lt_pct, 2)}%)
 
-P/L: ₹{int(lt_profit)} ({round(lt_pct,2)}%)
+📌 LT Analysis
+Trend: {lt_trend_ml} | {lt_valn}
+Buy Zone: ₹{lt_zone}
+Confidence: {lt_conf}
 
 ━━━━━━━━━━━━━━━
 🔴 SHORT TERM
 
 Cash: ₹{int(st_cash)}
-Units: {round(st_units,2)}
-
+Units: {round(st_units, 2)}
 Value: ₹{int(st_val)}
 P/L: ₹{int(st_profit)}
-Return: {round(st_pct,2)}%
+Return: {round(st_pct, 2)}%
 
 ━━━━━━━━━━━━━━━
 💎 TOTAL
@@ -273,6 +267,7 @@ P/L: ₹{int(total_profit)}
 🤖 AI DECISION
 
 Short-Term: {st_action} ₹{st_amt}
+{sl_line}
 Reason: {st_reason}
 
 Long-Term: {lt_action}
@@ -315,20 +310,20 @@ async def button(update, context):
     try:
         if q.data == "lt_buy":
             sheets.add_long(gold_price)
-            await q.message.reply_text("LT BUY DONE")
+            await q.message.reply_text("✅ LT BUY DONE")
 
         elif "buy_" in q.data:
             amt = int(q.data.split("_")[1])
             sheets.add_short("BUY", amt, bees_price)
-            await q.message.reply_text(f"BUY ₹{amt}")
+            await q.message.reply_text(f"✅ BUY ₹{amt} @ ₹{bees_price}")
 
         elif "sell_" in q.data:
             amt = int(q.data.split("_")[1])
             sheets.add_short("SELL", amt, bees_price)
-            await q.message.reply_text(f"SELL ₹{amt}")
+            await q.message.reply_text(f"✅ SELL ₹{amt} @ ₹{bees_price}")
 
     except Exception as e:
-        await q.message.reply_text(str(e))
+        await q.message.reply_text(f"❌ Error: {str(e)}")
 
 # ================= COMMANDS =================
 async def start(update, context):
@@ -341,7 +336,6 @@ async def force(update, context):
 def main():
     create_lock()
 
-    # FIX 4: post_init must be set on the builder, not the app after build()
     async def post_init(app):
         await app.bot.delete_webhook(drop_pending_updates=True)
 
@@ -352,11 +346,11 @@ def main():
     app.add_handler(CallbackQueryHandler(button))
 
     times = [
-        time(10,0,tzinfo=IST),
-        time(12,0,tzinfo=IST),
-        time(14,0,tzinfo=IST),
-        time(16,0,tzinfo=IST),
-        time(18,0,tzinfo=IST),
+        time(10, 0, tzinfo=IST),
+        time(12, 0, tzinfo=IST),
+        time(14, 0, tzinfo=IST),
+        time(16, 0, tzinfo=IST),
+        time(18, 0, tzinfo=IST),
     ]
 
     if app.job_queue:
