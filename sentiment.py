@@ -147,7 +147,7 @@ def get_fear_greed():
 def get_dxy():
     curr, _, chg = _yahoo_close("DX-Y.NYB")
     if curr is None:
-        return None, None, 50
+        return None, None, 50, "NA"
     # DXY up → gold bearish
     gold_score = max(10, min(90, 50 - chg * 25))
     impl = (
