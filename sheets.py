@@ -218,3 +218,39 @@ def already_bought():
         if str(r.get("Date", "")) >= cycle_start_str:
             return True
     return False
+
+
+def get_lt_raw():
+    """Returns all Long Term sheet records as list of dicts for the dashboard table."""
+    data = client().open("Gold Tracker").worksheet("Long Term").get_all_records()
+    rows = []
+    running_value = 0
+    for r in data:
+        amt   = safe(r.get("Amount", 0))
+        grams = safe(r.get("Grams", 0))
+        price = safe(r.get("Price", 0))
+        rows.append({
+            "date":   r.get("Date", ""),
+            "price":  price,
+            "amount": amt,
+            "grams":  grams,
+        })
+    return rows
+
+
+def get_st_raw():
+    """Returns all Short Term sheet records as list of dicts for the dashboard table."""
+    data = client().open("Gold Tracker").worksheet("Short Term").get_all_records()
+    rows = []
+    for r in data:
+        row_type = str(r.get("Type", "")).strip().upper()
+        rows.append({
+            "date":          r.get("Date", ""),
+            "type":          r.get("Type", ""),
+            "price":         safe(r.get("Price", 0)),
+            "amount":        safe(r.get("Amount", 0)),
+            "units":         safe(r.get("Units", 0)),
+            "cash_balance":  safe(r.get("Cash Balance", 0)),
+            "holding":       safe(r.get("Holding", 0)),
+        })
+    return rows
