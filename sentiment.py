@@ -443,7 +443,7 @@ def get_combined_sentiment():
     print("📡 Fetching sentiment data...")
 
     fg_score, fg_label, fg_gold         = get_fear_greed()
-    dxy_val, dxy_chg, dxy_gold, dxy_impl= get_dxy()           if True else (None,None,50,"NA")
+    dxy_val, dxy_chg, dxy_gold, dxy_impl= get_dxy()           
     yld_val, yld_chg, yld_gold, yld_impl= get_treasury_yield()
     oil_val, oil_chg, oil_gold, oil_impl= get_crude_oil()
     inr_val, inr_chg, inr_gold, inr_impl= get_inr_usd()
