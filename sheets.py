@@ -18,8 +18,6 @@ def safe(x):
 def client():
     creds = os.environ.get("GOOGLE_CREDENTIALS")
 
-    # FIX 1: Parse the env var as JSON before writing — it may be a JSON string,
-    # and writing it raw can produce an invalid or double-encoded cred.json
     if isinstance(creds, str):
         creds_data = json.loads(creds)
     else:
@@ -96,21 +94,28 @@ def add_short(txn, amount, price):
 def get_st_metrics(price):
     data = client().open("Gold Tracker").worksheet("Short Term").get_all_records()
 
-    # FIX 2: "Type" column should match the value used in add_short ("BUY"),
-    # but the column header may be "Type" or "Txn" — verify against your sheet.
-    # Also: 'invested' only sums BUY amounts but doesn't subtract SELLs,
-    # so profit/pct will be inflated over time. Fixed to use net invested.
-    buy_total = sum(safe(r["Amount"]) for r in data if r["Type"] == "BUY")
-    sell_total = sum(safe(r["Amount"]) for r in data if r["Type"] == "SELL")
-    invested = buy_total - sell_total
-
     cash, units = get_last_st()
+    holding_value = units * price
 
-    value = cash + units * price
-    profit = value - invested
-    pct = (profit / invested * 100) if invested else 0
+    # Compute cost basis of currently held units using average cost method
+    cost_basis = 0.0
+    running_units = 0.0
+    for r in data:
+        if r["Type"] == "BUY":
+            running_units += safe(r["Qty"])
+            cost_basis += safe(r["Amount"])
+        elif r["Type"] == "SELL":
+            if running_units > 0:
+                avg = cost_basis / running_units
+                sold_qty = safe(r["Qty"])
+                cost_basis -= avg * sold_qty
+                running_units -= sold_qty
 
-    return invested, cash, units, value, profit, pct
+    value = cash + holding_value
+    profit = holding_value - cost_basis
+    pct = (profit / cost_basis * 100) if cost_basis else 0
+
+    return cost_basis, cash, units, value, profit, pct
 
 
 def get_st_history():
@@ -154,8 +159,6 @@ def get_avg_buy_price():
 def already_bought():
     data = client().open("Gold Tracker").worksheet("Long Term").get_all_records()
 
-    # FIX 3: Checking only "%Y-%m" means ANY purchase this month counts as
-    # "already bought today". Changed to match the full date "%Y-%m-%d".
     today = datetime.now(IST).strftime("%Y-%m-%d")
     for r in data[::-1]:
         if r["Date"].startswith(today):
