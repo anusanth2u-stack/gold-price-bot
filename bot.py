@@ -26,7 +26,9 @@ LOCK_FILE = "bot.lock"
 def create_lock():
     if os.path.exists(LOCK_FILE):
         exit()
-    open(LOCK_FILE, "w").write("running")
+    # FIX 2: Use 'with' to properly close file handles
+    with open(LOCK_FILE, "w") as f:
+        f.write("running")
 
 def remove_lock():
     if os.path.exists(LOCK_FILE):
@@ -37,12 +39,16 @@ atexit.register(remove_lock)
 # ================= CACHE =================
 def load_cache():
     try:
-        return json.load(open(CACHE_FILE))
+        # FIX 2: Use 'with' to properly close file handles
+        with open(CACHE_FILE) as f:
+            return json.load(f)
     except:
         return {}
 
 def save_cache(data):
-    json.dump(data, open(CACHE_FILE, "w"))
+    # FIX 2: Use 'with' to properly close file handles
+    with open(CACHE_FILE, "w") as f:
+        json.dump(data, f)
 
 def set_cached(key, value):
     data = load_cache()
@@ -68,7 +74,8 @@ def get_gold_price():
 
         text = soup.get_text()
 
-        matches = re.findall(r"\₹\d{1,2},\d{3}", text)
+        # FIX 1: Remove invalid escape \₹ — ₹ does not need escaping in regex
+        matches = re.findall(r"₹\d{1,2},\d{3}", text)
 
         for m in matches:
             val = float(m.replace("₹", "").replace(",", ""))
@@ -221,7 +228,8 @@ async def send_dashboard(context: ContextTypes.DEFAULT_TYPE):
         bought, gold_price, avg_price, gold_trend, gold_history
     )
 
-    sheets.log_data(gold_price, gold_trend, score, bees_price, bees_trend, score)
+    # FIX 3: Last argument was duplicate 'score'; changed to 'win_rate'
+    sheets.log_data(gold_price, gold_trend, score, bees_price, bees_trend, win_rate)
 
     total_val = st_val + lt_val
     total_profit = total_val - (st_inv + lt_inv)
@@ -333,12 +341,11 @@ async def force(update, context):
 def main():
     create_lock()
 
-    app = ApplicationBuilder().token(TOKEN).build()
-
+    # FIX 4: post_init must be set on the builder, not the app after build()
     async def post_init(app):
         await app.bot.delete_webhook(drop_pending_updates=True)
 
-    app.post_init = post_init
+    app = ApplicationBuilder().token(TOKEN).post_init(post_init).build()
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("force", force))
