@@ -63,8 +63,13 @@ def get_last_st():
     data = client().open("Gold Tracker").worksheet("Short Term").get_all_records()
     if not data:
         return 0, 0
-    last = data[-1]
-    return safe(last["Cash Balance"]), safe(last["Holding"])
+    # Find the last row that has a valid Cash Balance
+    for r in reversed(data):
+        cb = r.get("Cash Balance", "")
+        h = r.get("Holding", "")
+        if cb != "" and h != "":
+            return safe(cb), safe(h)
+    return 0, 0
 
 
 def add_short(txn, amount, price):
@@ -74,17 +79,27 @@ def add_short(txn, amount, price):
     qty = round(amount / price, 2)
 
     if txn == "BUY":
+        # FIX: Validate sufficient cash before buying
+        if amount > cash:
+            raise ValueError(f"Insufficient cash. Available: ₹{round(cash, 2)}, Required: ₹{amount}")
         cash -= amount
         units += qty
-    else:
+
+    elif txn == "SELL":
+        # FIX: Cap sell qty to units actually held — never sell more than you own
+        if qty > units:
+            qty = round(units, 2)
+            amount = round(qty * price, 2)
+        if qty <= 0:
+            raise ValueError("No units available to sell")
         cash += amount
-        units -= qty
+        units = round(units - qty, 2)
 
     sheet.append_row([
         datetime.now(IST).strftime("%Y-%m-%d"),
         txn,
         price,
-        amount,
+        round(amount, 2),
         qty,
         round(cash, 2),
         round(units, 2)
@@ -97,23 +112,29 @@ def get_st_metrics(price):
     cash, units = get_last_st()
     holding_value = units * price
 
-    # Compute cost basis of currently held units using average cost method
+    # FIX: Skip BUDGET and any non-trade rows — only BUY/SELL count for cost basis
     cost_basis = 0.0
     running_units = 0.0
+
     for r in data:
-        if r["Type"] == "BUY":
+        row_type = str(r.get("Type", "")).strip().upper()
+
+        if row_type not in ("BUY", "SELL"):
+            continue
+
+        if row_type == "BUY":
             running_units += safe(r["Qty"])
             cost_basis += safe(r["Amount"])
-        elif r["Type"] == "SELL":
-            if running_units > 0:
-                avg = cost_basis / running_units
-                sold_qty = safe(r["Qty"])
-                cost_basis -= avg * sold_qty
-                running_units -= sold_qty
 
-    value = cash + holding_value
+        elif row_type == "SELL" and running_units > 0:
+            avg = cost_basis / running_units
+            sold_qty = safe(r["Qty"])
+            cost_basis -= avg * sold_qty
+            running_units -= sold_qty
+
     profit = holding_value - cost_basis
     pct = (profit / cost_basis * 100) if cost_basis else 0
+    value = cash + holding_value
 
     return cost_basis, cash, units, value, profit, pct
 
