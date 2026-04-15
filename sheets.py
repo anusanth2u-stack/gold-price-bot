@@ -63,7 +63,7 @@ def get_last_st():
     data = client().open("Gold Tracker").worksheet("Short Term").get_all_records()
     if not data:
         return 0, 0
-    # Find the last row that has a valid Cash Balance
+    # Find the last row with valid Cash Balance and Holding
     for r in reversed(data):
         cb = r.get("Cash Balance", "")
         h = r.get("Holding", "")
@@ -76,17 +76,16 @@ def add_short(txn, amount, price):
     sheet = client().open("Gold Tracker").worksheet("Short Term")
 
     cash, units = get_last_st()
+    # Column header in sheet is "Units"
     qty = round(amount / price, 2)
 
     if txn == "BUY":
-        # FIX: Validate sufficient cash before buying
         if amount > cash:
             raise ValueError(f"Insufficient cash. Available: ₹{round(cash, 2)}, Required: ₹{amount}")
         cash -= amount
         units += qty
 
     elif txn == "SELL":
-        # FIX: Cap sell qty to units actually held — never sell more than you own
         if qty > units:
             qty = round(units, 2)
             amount = round(qty * price, 2)
@@ -100,9 +99,9 @@ def add_short(txn, amount, price):
         txn,
         price,
         round(amount, 2),
-        qty,
-        round(cash, 2),
-        round(units, 2)
+        qty,            # column E = "Units" in sheet
+        round(cash, 2), # column F = "Cash Balance"
+        round(units, 2) # column G = "Holding"
     ])
 
 
@@ -112,7 +111,7 @@ def get_st_metrics(price):
     cash, units = get_last_st()
     holding_value = units * price
 
-    # FIX: Skip BUDGET and any non-trade rows — only BUY/SELL count for cost basis
+    # FIX: Column is "Units" not "Qty" — matches actual sheet header
     cost_basis = 0.0
     running_units = 0.0
 
@@ -123,12 +122,12 @@ def get_st_metrics(price):
             continue
 
         if row_type == "BUY":
-            running_units += safe(r["Qty"])
+            running_units += safe(r["Units"])   # was r["Qty"] — KeyError fix
             cost_basis += safe(r["Amount"])
 
         elif row_type == "SELL" and running_units > 0:
             avg = cost_basis / running_units
-            sold_qty = safe(r["Qty"])
+            sold_qty = safe(r["Units"])         # was r["Qty"] — KeyError fix
             cost_basis -= avg * sold_qty
             running_units -= sold_qty
 
