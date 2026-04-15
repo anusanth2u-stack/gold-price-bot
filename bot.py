@@ -2,7 +2,7 @@ import os
 import requests
 from bs4 import BeautifulSoup
 import re
-from datetime import datetime, time
+from datetime import datetime, date, time
 import pytz
 import json
 import atexit
@@ -13,16 +13,16 @@ from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandle
 import logic
 import sheets
 import ml
+import sentiment as senti
 
-# ================= CONFIG =================
-TOKEN = os.environ.get("TELEGRAM_TOKEN")
+# ═══════════════════════════════════════════════════════
+TOKEN   = os.environ.get("TELEGRAM_TOKEN")
 USER_ID = 5400949107
-IST = pytz.timezone("Asia/Kolkata")
-
+IST     = pytz.timezone("Asia/Kolkata")
 CACHE_FILE = "price_cache.json"
-LOCK_FILE = "bot.lock"
+LOCK_FILE  = "bot.lock"
 
-# ================= LOCK =================
+# ═══════════════════════════════════════════════════════ LOCK
 def create_lock():
     if os.path.exists(LOCK_FILE):
         exit()
@@ -35,7 +35,7 @@ def remove_lock():
 
 atexit.register(remove_lock)
 
-# ================= CACHE =================
+# ═══════════════════════════════════════════════════════ CACHE
 def load_cache():
     try:
         with open(CACHE_FILE) as f:
@@ -60,114 +60,91 @@ def get_cached(key, expiry):
         return None
     return data["value"]
 
-# ================= GOLD =================
+# ═══════════════════════════════════════════════════════ GOLD PRICE
 def get_gold_price():
-
-    # 1️⃣ PRIMARY → KeralaGoldRates
     try:
-        url = "https://keralagoldrates.com/today-22k-gold-rate-kerala/"
-        r = requests.get(url, headers={"User-Agent": "Mozilla"}, timeout=5)
+        url  = "https://keralagoldrates.com/today-22k-gold-rate-kerala/"
+        r    = requests.get(url, headers={"User-Agent": "Mozilla"}, timeout=5)
         soup = BeautifulSoup(r.text, "html.parser")
-
-        text = soup.get_text()
-        matches = re.findall(r"₹\d{1,2},\d{3}", text)
-
-        for m in matches:
-            val = float(m.replace("₹", "").replace(",", ""))
+        for m in re.findall(r"₹\d{1,2},\d{3}", soup.get_text()):
+            val = float(m.replace("₹","").replace(",",""))
             if 13000 < val < 16000:
                 set_cached("gold", val)
                 return val, "LIVE"
-
     except Exception as e:
         print("KeralaGoldRates fail:", e)
 
-    # 2️⃣ FALLBACK → IndiaGoldRate
     try:
-        url = "https://www.indiagoldrate.co.in/22k-gold-rate.php"
-        r = requests.get(url, headers={"User-Agent": "Mozilla"}, timeout=5)
+        url  = "https://www.indiagoldrate.co.in/22k-gold-rate.php"
+        r    = requests.get(url, headers={"User-Agent": "Mozilla"}, timeout=5)
         soup = BeautifulSoup(r.text, "html.parser")
-
-        rows = soup.find_all("tr")
-        for row in rows:
+        for row in soup.find_all("tr"):
             cols = row.find_all("td")
             if len(cols) >= 2:
                 label = cols[0].get_text().lower()
-                value = cols[1].get_text().replace(",", "").strip()
+                value = cols[1].get_text().replace(",","").strip()
                 if "22" in label and value.isdigit():
                     val = float(value)
                     if 5000 < val < 8000:
                         set_cached("gold", val)
                         return val, "LIVE"
-
     except Exception as e:
         print("India fallback fail:", e)
 
     cached = get_cached("gold", 1800)
     if cached:
         return cached, "CACHE"
-
     return 14000, "DEFAULT"
 
-# ================= GOLDBEES =================
+# ═══════════════════════════════════════════════════════ GOLDBEES PRICE
 def get_goldbees_price():
-
-    # 1️⃣ Google Finance
     try:
-        url = "https://www.google.com/finance/quote/GOLDBEES:NSE"
-        r = requests.get(url, headers={"User-Agent": "Mozilla"}, timeout=5)
+        url  = "https://www.google.com/finance/quote/GOLDBEES:NSE"
+        r    = requests.get(url, headers={"User-Agent": "Mozilla"}, timeout=5)
         soup = BeautifulSoup(r.text, "html.parser")
-
-        tag = soup.find("div", {"class": "YMlKec fxKbKc"})
+        tag  = soup.find("div", {"class": "YMlKec fxKbKc"})
         if tag:
-            val = float(tag.text.replace("₹", "").replace(",", ""))
+            val = float(tag.text.replace("₹","").replace(",",""))
             if 80 < val < 200:
                 set_cached("bees", val)
                 return val, "LIVE"
-
     except Exception as e:
         print("Google fail:", e)
 
-    # 2️⃣ MoneyControl fallback
     try:
-        url = "https://www.moneycontrol.com/india/stockpricequote/gold-etf/nipponindiaetfgoldbees/GBE"
-        r = requests.get(url, headers={"User-Agent": "Mozilla"}, timeout=5)
+        url  = "https://www.moneycontrol.com/india/stockpricequote/gold-etf/nipponindiaetfgoldbees/GBE"
+        r    = requests.get(url, headers={"User-Agent": "Mozilla"}, timeout=5)
         soup = BeautifulSoup(r.text, "html.parser")
-
-        tag = soup.find("span", {"class": "inprice1"})
+        tag  = soup.find("span", {"class": "inprice1"})
         if tag:
             val = float(tag.text.strip())
             if 80 < val < 200:
                 set_cached("bees", val)
                 return val, "LIVE"
-
     except Exception as e:
         print("MC fail:", e)
 
     cached = get_cached("bees", 600)
     if cached:
         return cached, "CACHE"
-
     return 120, "DEFAULT"
 
-# ================= ALERT =================
+# ═══════════════════════════════════════════════════════ ALERT
 def check_price_alert(name, new_price, key):
     old = load_cache().get(key)
     if not old:
         return None
-
     change = ((new_price - old["value"]) / old["value"]) * 100
-
-    if abs(change) >= 1:
-        return f"""
-🚨 {name} ALERT
-
-Old: ₹{round(old['value'], 2)}
-New: ₹{round(new_price, 2)}
-Change: {round(change, 2)}%
-"""
+    if abs(change) >= 1.0:
+        return (
+            f"🚨 {name} ALERT\n\n"
+            f"Old: ₹{round(old['value'],2)}\n"
+            f"New: ₹{round(new_price,2)}\n"
+            f"Change: {round(change,2)}%"
+        )
     return None
 
-# ================= WINDOW =================
+# ═══════════════════════════════════════════════════════ HELPERS
 def is_window_open():
     return datetime.now(IST).hour in [10, 12, 14, 16, 18]
 
@@ -177,162 +154,187 @@ def extract_score(extra):
     except:
         return 50
 
-# ================= DASHBOARD =================
+def kalyan_cycle_label():
+    today = datetime.now(IST).date()
+    if today.day <= 23:
+        if today.month == 1:
+            start = date(today.year - 1, 12, 24)
+        else:
+            start = date(today.year, today.month - 1, 24)
+        end = date(today.year, today.month, 23)
+    else:
+        start = date(today.year, today.month, 24)
+        if today.month == 12:
+            end = date(today.year + 1, 1, 23)
+        else:
+            end = date(today.year, today.month + 1, 23)
+    return f"{start.strftime('%d %b')} – {end.strftime('%d %b')}"
+
+# ═══════════════════════════════════════════════════════ DASHBOARD
 async def send_dashboard(context: ContextTypes.DEFAULT_TYPE):
 
     gold_price, gold_src = get_gold_price()
     bees_price, bees_src = get_goldbees_price()
 
-    alert1 = check_price_alert("GOLD", gold_price, "gold")
+    alert1 = check_price_alert("GOLD",     gold_price, "gold")
     alert2 = check_price_alert("GOLDBEES", bees_price, "bees")
+    if alert1: await context.bot.send_message(chat_id=USER_ID, text=alert1)
+    if alert2: await context.bot.send_message(chat_id=USER_ID, text=alert2)
 
-    if alert1:
-        await context.bot.send_message(chat_id=USER_ID, text=alert1)
-    if alert2:
-        await context.bot.send_message(chat_id=USER_ID, text=alert2)
+    gold_daily = sheets.get_gold_daily()
+    bees_daily = sheets.get_bees_daily()
 
-    gold_history = sheets.get_gold_history()
-    bees_history = sheets.get_bees_history()
-
-    gold_trend, _ = logic.get_trend(gold_price, gold_history)
-    bees_trend, reason = logic.get_trend(bees_price, bees_history)
+    gold_trend, _      = logic.get_trend(gold_price, gold_daily)
+    bees_trend, reason = logic.get_trend(bees_price, bees_daily)
 
     st_inv, st_cash, st_units, st_val, st_profit, st_pct = sheets.get_st_metrics(bees_price)
-    lt_inv, lt_gold, lt_val, lt_profit, lt_pct = sheets.get_lt_metrics(gold_price)
+    lt_inv, lt_gold, lt_val, lt_profit, lt_pct           = sheets.get_lt_metrics(gold_price)
 
     avg_price = sheets.get_avg_buy_price()
-    bought = sheets.already_bought()
+    bought    = sheets.already_bought()
+    cycle_low = sheets.get_kalyan_cycle_low()
 
     st_data = sheets.get_st_history()
-    ml_low, ml_high, ml_signal, win_rate, extra = ml.short_term_ml(bees_history, st_data)
+    ml_low, ml_high, ml_signal, win_rate, extra = ml.short_term_ml(bees_daily, st_data)
+    ml_score = extract_score(extra)
 
-    score = extract_score(extra)
+    lt_trend_ml, lt_valn, lt_zone, lt_conf = ml.long_term_ml(gold_daily, avg_price, gold_price)
 
-    lt_trend_ml, lt_valn, lt_zone, lt_conf = ml.long_term_ml(gold_history, avg_price, gold_price)
+    # ── All three pillars fetched ──────────────────────────
+    sent = senti.get_combined_sentiment()
 
+    # ── Decisions (now use all three pillars) ──────────────
     st_action, st_amt, st_reason, sl, tgt = logic.short_term_ai(
-        st_cash, st_pct, bees_trend, score, win_rate, bees_price
+        st_cash, st_pct, bees_trend, ml_score, win_rate,
+        bees_price, st_units, sent
     )
 
     lt_action, lt_amt, lt_reason = logic.long_term_ai(
-        bought, gold_price, avg_price, gold_trend, gold_history
+        bought, gold_price, avg_price, gold_trend, gold_daily,
+        cycle_low, ml_score, sent
     )
 
-    sheets.log_data(gold_price, gold_trend, score, bees_price, bees_trend, win_rate)
+    sheets.log_data(gold_price, gold_trend, ml_score, bees_price, bees_trend, win_rate)
 
-    total_val = st_val + lt_val
-    total_profit = total_val - (st_inv + lt_inv)
+    total_val    = st_val + lt_val
+    total_invest = st_inv + lt_inv
+    total_profit = total_val - total_invest
 
-    sl_line = f"SL: ₹{sl} | Target: ₹{tgt}" if sl else ""
+    sl_line  = f"\n   🛑 SL:     ₹{sl}"  if sl  else ""
+    tgt_line = f"\n   🎯 Target: ₹{tgt}" if tgt else ""
+
+    cycle_label = kalyan_cycle_label()
+    low_line    = f"Cycle Low:  ₹{int(cycle_low)}" if cycle_low else "Cycle Low:  tracking..."
+
+    sent_block = senti.format_sentiment_block(sent)
 
     msg = f"""
 💎 GOLD AI PORTFOLIO ENGINE
 
-💰 Gold: ₹{gold_price} ({gold_src})
-📈 GoldBees: ₹{bees_price} ({bees_src})
+💰 Gold (22K): ₹{gold_price} ({gold_src})
+📈 GoldBees:   ₹{bees_price} ({bees_src})
 
-📊 Trend (Gold): {gold_trend}
-📊 Trend (GoldBees): {bees_trend}
-📉 {reason}
+📊 Gold Trend:     {gold_trend}
+📊 GoldBees Trend: {bees_trend}
+   {reason}
 
 ━━━━━━━━━━━━━━━
-🟢 LONG TERM
+🟢 KALYAN GOLD SCHEME
+   Cycle: {cycle_label}
 
 Invested: ₹{int(lt_inv)}
-Gold: {round(lt_gold, 3)}g
-Value: ₹{int(lt_val)}
-P/L: ₹{int(lt_profit)} ({round(lt_pct, 2)}%)
+Gold:     {round(lt_gold,3)}g
+Value:    ₹{int(lt_val)}
+P/L:      ₹{int(lt_profit)} ({round(lt_pct,2)}%)
 
-📌 LT Analysis
-Trend: {lt_trend_ml} | {lt_valn}
+{low_line}
 Buy Zone: ₹{lt_zone}
-Confidence: {lt_conf}
+ML Trend: {lt_trend_ml} | {lt_valn} | {lt_conf} confidence
 
 ━━━━━━━━━━━━━━━
-🔴 SHORT TERM
+🔴 GOLDBEES (Interday)
 
-Cash: ₹{int(st_cash)}
-Units: {round(st_units, 2)}
+Cash:  ₹{int(st_cash)}
+Units: {round(st_units,2)}
 Value: ₹{int(st_val)}
-P/L: ₹{int(st_profit)}
-Return: {round(st_pct, 2)}%
+P/L:   ₹{int(st_profit)} ({round(st_pct,2)}%)
 
 ━━━━━━━━━━━━━━━
 💎 TOTAL
 
-Value: ₹{int(total_val)}
-P/L: ₹{int(total_profit)}
+Invested: ₹{int(total_invest)}
+Value:    ₹{int(total_val)}
+P/L:      ₹{int(total_profit)}
 
 ━━━━━━━━━━━━━━━
 🤖 AI DECISION
 
-Short-Term: {st_action} ₹{st_amt}
-{sl_line}
-Reason: {st_reason}
+📌 Short-Term (GoldBees){sl_line}{tgt_line}
+   {st_action} ₹{st_amt}
+   {st_reason}
 
-Long-Term: {lt_action}
-Reason: {lt_reason}
+📌 Long-Term (Kalyan)
+   {lt_action}
+   {lt_reason}
+
+━━━━━━━━━━━━━━━
+🌐 MARKET SENTIMENT
+
+{sent_block}
 
 ━━━━━━━━━━━━━━━
 🤖 ML INSIGHTS
 
-Range: ₹{ml_low} - ₹{ml_high}
-Signal: {ml_signal}
-Win Rate: {win_rate}%
+Range:  ₹{ml_low} – ₹{ml_high}
+Signal: {ml_signal} | Win Rate: {win_rate}%
 {extra}
 """
 
     keyboard = []
-
     if lt_action == "BUY":
-        keyboard.append([InlineKeyboardButton("🟢 LT BUY ₹15000", callback_data="lt_buy")])
-
+        keyboard.append([InlineKeyboardButton("🟢 KALYAN BUY ₹15000", callback_data="lt_buy")])
     if st_action == "BUY":
         keyboard.append([InlineKeyboardButton(f"🟢 BUY ₹{st_amt}", callback_data=f"buy_{st_amt}")])
-
     if st_action == "SELL":
         keyboard.append([InlineKeyboardButton(f"🔴 SELL ₹{st_amt}", callback_data=f"sell_{st_amt}")])
 
-    await context.bot.send_message(chat_id=USER_ID, text=msg, reply_markup=InlineKeyboardMarkup(keyboard))
+    await context.bot.send_message(
+        chat_id=USER_ID, text=msg,
+        reply_markup=InlineKeyboardMarkup(keyboard) if keyboard else None
+    )
 
-# ================= BUTTON =================
+# ═══════════════════════════════════════════════════════ BUTTON
 async def button(update, context):
     q = update.callback_query
     await q.answer()
-
     if not is_window_open():
-        await q.message.reply_text("Window closed")
+        await q.message.reply_text("⏰ Window closed — bot runs at 10, 12, 14, 16, 18 IST")
         return
-
     gold_price, _ = get_gold_price()
     bees_price, _ = get_goldbees_price()
-
     try:
         if q.data == "lt_buy":
             sheets.add_long(gold_price)
-            await q.message.reply_text("✅ LT BUY DONE")
-
-        elif "buy_" in q.data:
+            await q.message.reply_text(f"✅ Kalyan BUY ₹15000 @ ₹{gold_price}/g")
+        elif q.data.startswith("buy_"):
             amt = int(q.data.split("_")[1])
             sheets.add_short("BUY", amt, bees_price)
             await q.message.reply_text(f"✅ BUY ₹{amt} @ ₹{bees_price}")
-
-        elif "sell_" in q.data:
+        elif q.data.startswith("sell_"):
             amt = int(q.data.split("_")[1])
             sheets.add_short("SELL", amt, bees_price)
             await q.message.reply_text(f"✅ SELL ₹{amt} @ ₹{bees_price}")
-
     except Exception as e:
         await q.message.reply_text(f"❌ Error: {str(e)}")
 
-# ================= COMMANDS =================
+# ═══════════════════════════════════════════════════════ COMMANDS
 async def start(update, context):
     await send_dashboard(context)
 
 async def force(update, context):
     await send_dashboard(context)
 
-# ================= MAIN =================
+# ═══════════════════════════════════════════════════════ MAIN
 def main():
     create_lock()
 
@@ -340,19 +342,15 @@ def main():
         await app.bot.delete_webhook(drop_pending_updates=True)
 
     app = ApplicationBuilder().token(TOKEN).post_init(post_init).build()
-
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("force", force))
     app.add_handler(CallbackQueryHandler(button))
 
     times = [
-        time(10, 0, tzinfo=IST),
-        time(12, 0, tzinfo=IST),
-        time(14, 0, tzinfo=IST),
-        time(16, 0, tzinfo=IST),
+        time(10, 0, tzinfo=IST), time(12, 0, tzinfo=IST),
+        time(14, 0, tzinfo=IST), time(16, 0, tzinfo=IST),
         time(18, 0, tzinfo=IST),
     ]
-
     if app.job_queue:
         for t in times:
             app.job_queue.run_daily(send_dashboard, time=t)
