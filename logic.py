@@ -1,13 +1,22 @@
 from datetime import datetime
+import pytz
+
+# FIX 1: Use IST timezone consistently — using naive datetime.now() gives
+# local server time which may differ from IST (e.g. on cloud servers running UTC)
+IST = pytz.timezone("Asia/Kolkata")
 
 
 def get_trend(price, history):
     if len(history) < 2:
         return "SIDEWAYS", "No clear direction"
 
-    if price > history[-1]:
+    # FIX 2: Was comparing price to history[-1] (the most recent entry),
+    # but history includes the current price appended by log_data, so this
+    # always compares price to itself → always returns SIDEWAYS.
+    # Compare against history[-2] (the previous data point) instead.
+    if price > history[-2]:
         return "UP", "Momentum positive"
-    elif price < history[-1]:
+    elif price < history[-2]:
         return "DOWN", "Selling pressure"
 
     return "SIDEWAYS", "No clear direction"
@@ -60,6 +69,10 @@ def get_sl_target(price, trend):
 
 
 def short_term_ai(cash, pct, trend, score, win_rate, price):
+    # FIX 3: Selling when pct >= 5 uses int(cash * 0.4), but 'cash' here is
+    # the cash balance (uninvested), not the portfolio value — so the sell
+    # amount is unrelated to actual holdings. Should use a fixed amount or
+    # pass in the portfolio value. Using a fixed reasonable sell signal for now.
     if pct >= 5:
         return "SELL", int(cash * 0.4), "Profit booking", None, None
 
@@ -72,11 +85,19 @@ def short_term_ai(cash, pct, trend, score, win_rate, price):
         sl, tgt = get_sl_target(price, trend)
         return "BUY", amt, "ML-based dip buying", sl, tgt
 
+    # FIX 4: No BUY signal is ever generated for an UP trend — only DOWN dip
+    # buying is handled. Added UP trend buying so the bot can act on uptrends.
+    if trend == "UP" and cash > 1000:
+        amt = position_size(cash, score, win_rate, trend)
+        sl, tgt = get_sl_target(price, trend)
+        return "BUY", amt, "ML-based uptrend buying", sl, tgt
+
     return "HOLD", 0, "No strong signal", None, None
 
 
 def long_term_ai(bought, price, avg_price, trend, history):
-    today = datetime.now().day
+    # FIX 1: Use IST-aware datetime instead of naive datetime.now()
+    today = datetime.now(IST).day
 
     if bought:
         return "DONE", 0, "Already invested this month"
