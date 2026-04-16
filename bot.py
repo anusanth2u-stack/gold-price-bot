@@ -25,13 +25,14 @@ USER_ID = 5400949107
 IST     = pytz.timezone("Asia/Kolkata")
 CACHE_FILE = "price_cache.json"
 LOCK_FILE  = "bot.lock"
+DASHBOARD_URL = "https://goldmarket.onrender.com"
 
 # ─────────────────────────────────────────────────────
-# Flask API — serves live data to goldmarket.onrender.com
+# Flask API
 # ─────────────────────────────────────────────────────
-app_web    = Flask(__name__)
-CORS(app_web)          # allow goldmarket.onrender.com to fetch from this API
-latest_data = {}       # populated every time send_dashboard() runs
+app_web     = Flask(__name__)
+CORS(app_web)
+latest_data = {}
 
 @app_web.route("/data")
 def get_data():
@@ -43,12 +44,8 @@ def get_data():
 def health():
     return jsonify({"status": "ok", "updated": latest_data.get("updated_at", "never")})
 
-# ── Simple PIN verification (no email needed) ────────────────────────────
-# Set OTP_PIN env var in Render to your chosen 6-digit PIN e.g. 482931
-
 @app_web.route("/send-otp", methods=["POST"])
 def send_otp():
-    # No email — just confirm PIN is configured and tell frontend to show PIN screen
     pin = os.environ.get("OTP_PIN", "")
     if not pin:
         return jsonify({"ok": False, "message": "OTP_PIN not set in environment"}), 500
@@ -82,14 +79,12 @@ def run_flask():
 
 # ═══════════════════════════════════════════════════════ LOCK
 def create_lock():
-    # On Render each deploy is a fresh container.
-    # Skip the exit() on cloud, only enforce locally.
     if os.path.exists(LOCK_FILE):
         if not os.environ.get("RENDER"):
             print("Lock file exists locally — exiting.")
             exit()
         else:
-            os.remove(LOCK_FILE)  # stale lock from previous deploy
+            os.remove(LOCK_FILE)
     with open(LOCK_FILE, "w") as f:
         f.write("running")
 
@@ -98,6 +93,7 @@ def remove_lock():
         os.remove(LOCK_FILE)
 
 atexit.register(remove_lock)
+
 
 # ═══════════════════════════════════════════════════════ CACHE
 def load_cache():
@@ -123,6 +119,7 @@ def get_cached(key, expiry):
     if datetime.now().timestamp() - data["time"] > expiry:
         return None
     return data["value"]
+
 
 # ═══════════════════════════════════════════════════════ GOLD PRICE
 def get_gold_price():
@@ -160,6 +157,7 @@ def get_gold_price():
         return cached, "CACHE"
     return 14000, "DEFAULT"
 
+
 # ═══════════════════════════════════════════════════════ GOLDBEES
 def get_goldbees_price():
     try:
@@ -193,6 +191,7 @@ def get_goldbees_price():
         return cached, "CACHE"
     return 120, "DEFAULT"
 
+
 # ═══════════════════════════════════════════════════════ ALERT
 def check_price_alert(name, new_price, key):
     old = load_cache().get(key)
@@ -207,6 +206,7 @@ def check_price_alert(name, new_price, key):
             f"Change: {round(change,2)}%"
         )
     return None
+
 
 # ═══════════════════════════════════════════════════════ HELPERS
 def is_window_open():
@@ -246,13 +246,13 @@ def kalyan_days_left():
     return (deadline - today).days
 
 def kalyan_cycle_pct():
-    """% progress through the 30-day cycle for the progress bar."""
     today = datetime.now(IST).date()
     if today.day <= 23:
         days_elapsed = 30 - (23 - today.day) - 1
     else:
         days_elapsed = today.day - 24
     return min(100, max(0, int((days_elapsed / 30) * 100)))
+
 
 # ═══════════════════════════════════════════════════════ DASHBOARD
 async def send_dashboard(context: ContextTypes.DEFAULT_TYPE):
@@ -285,7 +285,27 @@ async def send_dashboard(context: ContextTypes.DEFAULT_TYPE):
 
     lt_trend_ml, lt_valn, lt_zone, lt_conf = ml.long_term_ml(gold_daily, avg_price, gold_price)
 
-    sent = senti.get_combined_sentiment()
+    # Wrap sentiment in try/except so failures never block dashboard
+    try:
+        sent = senti.get_combined_sentiment()
+    except Exception as e:
+        print(f"Sentiment failed: {e}")
+        sent = {
+            "score": 50, "label": "NEUTRAL 🟡",
+            "summary": "Sentiment data temporarily unavailable",
+            "top_drivers": [],
+            "fear_greed":  (None, "NA", 50),
+            "dxy":         (None, None, 50, "NA"),
+            "yield_10y":   (None, None, 50, "NA"),
+            "crude_oil":   (None, None, 50, "NA"),
+            "inr_usd":     (None, None, 50, "NA"),
+            "nifty":       (None, None, 50, "NA"),
+            "sp500":       (None, None, 50, "NA"),
+            "news":        (50, 0, []),
+            "geopolitical":(  "UNKNOWN", 50),
+            "banking":     ("NEUTRAL", 50),
+            "seasonal":    ("Off-season", "LOW", 40),
+        }
 
     st_action, st_amt, st_reason, sl, tgt = logic.short_term_ai(
         st_cash, st_pct, bees_trend, ml_score, win_rate,
@@ -305,99 +325,68 @@ async def send_dashboard(context: ContextTypes.DEFAULT_TYPE):
 
     # ── Update latest_data for the Flask /data endpoint ──
     latest_data = {
-        # Prices
-        "gold_price":  gold_price,
-        "gold_src":    gold_src,
-        "gold_trend":  gold_trend,
-        "gold_reason": gold_reason,
-        "bees_price":  bees_price,
-        "bees_src":    bees_src,
-        "bees_trend":  bees_trend,
-        "bees_reason": bees_reason,
-
-        # Long term
-        "lt_inv":       lt_inv,
-        "lt_gold":      round(lt_gold, 3),
-        "lt_val":       lt_val,
-        "lt_profit":    lt_profit,
-        "lt_pct":       round(lt_pct, 2),
-        "lt_ml_trend":  lt_trend_ml,
-        "lt_valn":      lt_valn,
-        "lt_zone":      lt_zone,
-        "lt_conf":      lt_conf,
-        "cycle_label":  kalyan_cycle_label(),
-        "cycle_low":    cycle_low,
-        "days_left":    kalyan_days_left(),
-        "cycle_pct":    kalyan_cycle_pct(),
-
-        # Short term
-        "st_inv":    st_inv,
-        "st_cash":   st_cash,
-        "st_units":  round(st_units, 2),
-        "st_val":    st_val,
-        "st_profit": st_profit,
-        "st_pct":    round(st_pct, 2),
-
-        # Totals
-        "total_invest":  total_invest,
-        "total_val":     total_val,
-        "total_profit":  total_profit,
-
-        # AI decisions
-        "st_action": st_action,
-        "st_amt":    st_amt,
-        "st_reason": st_reason,
-        "sl":        sl,
-        "tgt":       tgt,
-        "lt_action": lt_action,
-        "lt_reason": lt_reason,
-
-        # ML
-        "ml_score":   ml_score,
-        "ml_signal":  ml_signal,
-        "ml_winrate": win_rate,
-        "ml_low":     ml_low,
-        "ml_high":    ml_high,
-        "ml_detail":  extra,
-
-        # Sentiment (full dict)
-        "sent_score":   sent.get("score", 50),
-        "sent_label":   sent.get("label", "NEUTRAL"),
-        "sent_summary": sent.get("summary", ""),
-        "drivers":      sent.get("top_drivers", []),
-        "fg_score":     sent.get("fear_greed", (None,"NA",50))[0],
-        "fg_label":     sent.get("fear_greed", (None,"NA",50))[1],
-        "fg_impl":      sent.get("fear_greed", (None,"NA",50))[2],
-        "dxy_val":      sent.get("dxy", (None,None,50,"NA"))[0],
-        "dxy_chg":      sent.get("dxy", (None,None,50,"NA"))[1],
-        "dxy_impl":     sent.get("dxy", (None,None,50,"NA"))[3],
-        "yld_val":      sent.get("yield_10y", (None,None,50,"NA"))[0],
-        "yld_chg":      sent.get("yield_10y", (None,None,50,"NA"))[1],
-        "yld_impl":     sent.get("yield_10y", (None,None,50,"NA"))[3],
-        "oil_val":      sent.get("crude_oil", (None,None,50,"NA"))[0],
-        "oil_chg":      sent.get("crude_oil", (None,None,50,"NA"))[1],
-        "oil_impl":     sent.get("crude_oil", (None,None,50,"NA"))[3],
-        "sp_val":       sent.get("sp500", (None,None,50,"NA"))[0],
-        "sp_chg":       sent.get("sp500", (None,None,50,"NA"))[1],
-        "sp_impl":      sent.get("sp500", (None,None,50,"NA"))[3],
-        "inr_val":      sent.get("inr_usd", (None,None,50,"NA"))[0],
-        "inr_chg":      sent.get("inr_usd", (None,None,50,"NA"))[1],
-        "inr_impl":     sent.get("inr_usd", (None,None,50,"NA"))[3],
-        "nifty_val":    sent.get("nifty", (None,None,50,"NA"))[0],
-        "nifty_chg":    sent.get("nifty", (None,None,50,"NA"))[1],
-        "nifty_impl":   sent.get("nifty", (None,None,50,"NA"))[3],
-        "season_name":  sent.get("seasonal", ("Off-season","LOW",40))[0],
-        "season_level": sent.get("seasonal", ("Off-season","LOW",40))[1],
-        "geo_label":    sent.get("geopolitical", ("UNKNOWN",50))[0],
-        "bank_label":   sent.get("banking", ("NEUTRAL",50))[0],
-        "news_score":   sent.get("news", (50,0,[]))[0],
-        "news_cnt":     sent.get("news", (50,0,[]))[1],
-        "headlines":    sent.get("news", (50,0,[]))[2],
-
-        "updated_at": datetime.now(IST).strftime("%d %b %Y %H:%M IST")
+        "gold_price":  gold_price,  "gold_src":    gold_src,
+        "gold_trend":  gold_trend,  "gold_reason": gold_reason,
+        "bees_price":  bees_price,  "bees_src":    bees_src,
+        "bees_trend":  bees_trend,  "bees_reason": bees_reason,
+        "lt_inv":      lt_inv,      "lt_gold":     round(lt_gold, 3),
+        "lt_val":      lt_val,      "lt_profit":   lt_profit,
+        "lt_pct":      round(lt_pct, 2),
+        "lt_ml_trend": lt_trend_ml, "lt_valn":     lt_valn,
+        "lt_zone":     lt_zone,     "lt_conf":     lt_conf,
+        "cycle_label": kalyan_cycle_label(),
+        "cycle_low":   cycle_low,
+        "days_left":   kalyan_days_left(),
+        "cycle_pct":   kalyan_cycle_pct(),
+        "st_inv":      st_inv,      "st_cash":     st_cash,
+        "st_units":    round(st_units, 2),
+        "st_val":      st_val,      "st_profit":   st_profit,
+        "st_pct":      round(st_pct, 2),
+        "total_invest":total_invest,"total_val":   total_val,
+        "total_profit":total_profit,
+        "st_action":   st_action,   "st_amt":      st_amt,
+        "st_reason":   st_reason,   "sl":          sl,
+        "tgt":         tgt,         "lt_action":   lt_action,
+        "lt_reason":   lt_reason,
+        "ml_score":    ml_score,    "ml_signal":   ml_signal,
+        "ml_winrate":  win_rate,    "ml_low":      ml_low,
+        "ml_high":     ml_high,     "ml_detail":   extra,
+        "sent_score":  sent.get("score", 50),
+        "sent_label":  sent.get("label", "NEUTRAL"),
+        "sent_summary":sent.get("summary", ""),
+        "drivers":     sent.get("top_drivers", []),
+        "fg_score":    sent.get("fear_greed", (None,"NA",50))[0],
+        "fg_label":    sent.get("fear_greed", (None,"NA",50))[1],
+        "fg_impl":     sent.get("fear_greed", (None,"NA",50))[2],
+        "dxy_val":     sent.get("dxy", (None,None,50,"NA"))[0],
+        "dxy_chg":     sent.get("dxy", (None,None,50,"NA"))[1],
+        "dxy_impl":    sent.get("dxy", (None,None,50,"NA"))[3],
+        "yld_val":     sent.get("yield_10y", (None,None,50,"NA"))[0],
+        "yld_chg":     sent.get("yield_10y", (None,None,50,"NA"))[1],
+        "yld_impl":    sent.get("yield_10y", (None,None,50,"NA"))[3],
+        "oil_val":     sent.get("crude_oil", (None,None,50,"NA"))[0],
+        "oil_chg":     sent.get("crude_oil", (None,None,50,"NA"))[1],
+        "oil_impl":    sent.get("crude_oil", (None,None,50,"NA"))[3],
+        "sp_val":      sent.get("sp500", (None,None,50,"NA"))[0],
+        "sp_chg":      sent.get("sp500", (None,None,50,"NA"))[1],
+        "sp_impl":     sent.get("sp500", (None,None,50,"NA"))[3],
+        "inr_val":     sent.get("inr_usd", (None,None,50,"NA"))[0],
+        "inr_chg":     sent.get("inr_usd", (None,None,50,"NA"))[1],
+        "inr_impl":    sent.get("inr_usd", (None,None,50,"NA"))[3],
+        "nifty_val":   sent.get("nifty", (None,None,50,"NA"))[0],
+        "nifty_chg":   sent.get("nifty", (None,None,50,"NA"))[1],
+        "nifty_impl":  sent.get("nifty", (None,None,50,"NA"))[3],
+        "season_name": sent.get("seasonal", ("Off-season","LOW",40))[0],
+        "season_level":sent.get("seasonal", ("Off-season","LOW",40))[1],
+        "geo_label":   sent.get("geopolitical", ("UNKNOWN",50))[0],
+        "bank_label":  sent.get("banking", ("NEUTRAL",50))[0],
+        "news_score":  sent.get("news", (50,0,[]))[0],
+        "news_cnt":    sent.get("news", (50,0,[]))[1],
+        "headlines":   sent.get("news", (50,0,[]))[2],
+        "updated_at":  datetime.now(IST).strftime("%d %b %Y %H:%M IST"),
     }
 
-    # ── Telegram message ─────────────────────────────────
+    # ── Telegram message ──
     sl_line  = f"\n   🛑 SL:     ₹{sl}"  if sl  else ""
     tgt_line = f"\n   🎯 Target: ₹{tgt}" if tgt else ""
     cycle_label = kalyan_cycle_label()
@@ -455,18 +444,32 @@ P/L:   ₹{int(st_profit)} ({round(st_pct,2)}%)
 {extra}
 """
 
+    # ── Build keyboard with trade buttons + dashboard button ──
     keyboard = []
+
+    # Row 1: Trade action buttons
+    trade_row = []
     if lt_action == "BUY":
-        keyboard.append([InlineKeyboardButton("🟢 KALYAN BUY ₹15000", callback_data="lt_buy")])
+        trade_row.append(InlineKeyboardButton("🟢 KALYAN BUY ₹15000", callback_data="lt_buy"))
+    if trade_row:
+        keyboard.append(trade_row)
+
     if st_action == "BUY":
         keyboard.append([InlineKeyboardButton(f"🟢 BUY ₹{st_amt}", callback_data=f"buy_{st_amt}")])
     if st_action == "SELL":
         keyboard.append([InlineKeyboardButton(f"🔴 SELL ₹{st_amt}", callback_data=f"sell_{st_amt}")])
 
+    # Always add dashboard button at the bottom
+    keyboard.append([
+        InlineKeyboardButton("📊 View Live Dashboard", url=DASHBOARD_URL)
+    ])
+
     await context.bot.send_message(
-        chat_id=USER_ID, text=msg,
-        reply_markup=InlineKeyboardMarkup(keyboard) if keyboard else None
+        chat_id=USER_ID,
+        text=msg,
+        reply_markup=InlineKeyboardMarkup(keyboard),
     )
+
 
 # ═══════════════════════════════════════════════════════ BUTTON
 async def button(update, context):
@@ -480,56 +483,78 @@ async def button(update, context):
     try:
         if q.data == "lt_buy":
             sheets.add_long(gold_price)
-            await q.message.reply_text(f"✅ Kalyan BUY ₹15000 @ ₹{gold_price}/g")
+            await q.message.reply_text(
+                f"✅ Kalyan BUY ₹15000 @ ₹{gold_price}/g",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("📊 View Dashboard", url=DASHBOARD_URL)
+                ]])
+            )
         elif q.data.startswith("buy_"):
             amt = int(q.data.split("_")[1])
             sheets.add_short("BUY", amt, bees_price)
-            await q.message.reply_text(f"✅ BUY ₹{amt} @ ₹{bees_price}")
+            await q.message.reply_text(
+                f"✅ BUY ₹{amt} @ ₹{bees_price}",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("📊 View Dashboard", url=DASHBOARD_URL)
+                ]])
+            )
         elif q.data.startswith("sell_"):
             amt = int(q.data.split("_")[1])
             sheets.add_short("SELL", amt, bees_price)
-            await q.message.reply_text(f"✅ SELL ₹{amt} @ ₹{bees_price}")
+            await q.message.reply_text(
+                f"✅ SELL ₹{amt} @ ₹{bees_price}",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("📊 View Dashboard", url=DASHBOARD_URL)
+                ]])
+            )
     except Exception as e:
         await q.message.reply_text(f"❌ Error: {str(e)}")
 
+
 # ═══════════════════════════════════════════════════════ COMMANDS
 async def start(update, context):
+    await update.message.reply_text(
+        "💎 *Gold AI Portfolio Engine*\n\nStarting dashboard...",
+        parse_mode="Markdown",
+    )
     await send_dashboard(context)
 
 async def force(update, context):
+    await update.message.reply_text("🔄 Refreshing dashboard...")
     await send_dashboard(context)
 
 async def dashboard_link(update, context):
     await update.message.reply_text(
         "📊 Open your live dashboard:",
         reply_markup=InlineKeyboardMarkup([[
-            InlineKeyboardButton("🌐 Open Dashboard", url="https://goldmarket.onrender.com")
+            InlineKeyboardButton("🌐 Open Dashboard", url=DASHBOARD_URL)
         ]])
     )
+
+async def help_cmd(update, context):
+    await update.message.reply_text(
+        "💎 *Gold AI Bot Commands*\n\n"
+        "/start — Start & show dashboard\n"
+        "/force — Force refresh dashboard\n"
+        "/dashboard — Get dashboard link\n"
+        "/help — Show this help\n\n"
+        "Auto-runs at: 10, 12, 14, 16, 18 IST",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup([[
+            InlineKeyboardButton("📊 Open Dashboard", url=DASHBOARD_URL)
+        ]])
+    )
+
 
 # ═══════════════════════════════════════════════════════ MAIN
 def main():
     create_lock()
 
-    # ── Kill any existing polling session first ──
-    import asyncio, telegram
-    async def clear_session():
-        bot = telegram.Bot(TOKEN)
-        await bot.delete_webhook(drop_pending_updates=True)
-        # Force-close old polling by getting updates with timeout=0
-        try:
-            await bot.get_updates(offset=-1, timeout=0)
-        except Exception:
-            pass
-    asyncio.run(clear_session())
-
-    # ── FIX 1: Start Flask FIRST so Render sees an open port ──
-    # Render health-checks for an open port immediately on start.
-    # If Flask isn't up first, Render kills the service.
+    # Start Flask first so Render sees an open port immediately
     flask_thread = threading.Thread(target=run_flask, daemon=True)
     flask_thread.start()
 
-    # Wait until Flask is actually accepting connections
+    # Wait until Flask is accepting connections
     import socket, time as _time
     port = int(os.environ.get("PORT", 8080))
     for _ in range(20):
@@ -541,9 +566,8 @@ def main():
         except OSError:
             _time.sleep(0.5)
 
-    # ── FIX 2: Delete any existing webhook AND drop pending updates
-    # before starting polling, to avoid the Conflict error when
-    # a previous instance is still registered with Telegram.
+    # Delete webhook + drop pending updates before polling
+    # This clears any stale Telegram session from previous deploys
     async def post_init(app):
         await app.bot.delete_webhook(drop_pending_updates=True)
         print("Webhook cleared ✅")
@@ -552,6 +576,7 @@ def main():
     app.add_handler(CommandHandler("start",     start))
     app.add_handler(CommandHandler("force",     force))
     app.add_handler(CommandHandler("dashboard", dashboard_link))
+    app.add_handler(CommandHandler("help",      help_cmd))
     app.add_handler(CallbackQueryHandler(button))
 
     times = [
@@ -564,8 +589,8 @@ def main():
             app.job_queue.run_daily(send_dashboard, time=t)
 
     print("Telegram bot running 🚀")
-    # drop_pending_updates=True also clears any queued messages from old instance
     app.run_polling(drop_pending_updates=True, allowed_updates=["message", "callback_query"])
+
 
 if __name__ == "__main__":
     main()
